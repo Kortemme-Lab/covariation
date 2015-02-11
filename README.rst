@@ -2,11 +2,7 @@
 Covariation benchmark
 ====================================
 
-todo: discuss
-
-- sequence recovery
-- profile recovery of protein families / sequence entropy
-- amino acid covariation
+Evolutionary pressures on protein structure and function have shaped the amino acid sequences of today's naturally occurring proteins. Consequently, the sequences of natural proteins are nearly optimal for their structures. Natural protein sequences therefore provide valuable information for evaluating the accuracy of computational protein design. The purpose of this benchmark is to evaluate the extent to which protein design can recapitulate properties of naturally occurring proteins, including amino acid sequence preferences (“sequence profiles”) and patterns of amino acid covariation.
 
 This benchmark includes:
 
