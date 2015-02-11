@@ -6,7 +6,11 @@ Evolutionary pressures on protein structure and function have shaped the amino a
 
 This benchmark includes:
 
-- todo:
+- a set of 40 diverse protein domains with representative crystal structures and sequence alignments
+- command line arguments for running fixed backbone and flexible backbone design methods in Rosetta
+- analysis scripts that compare sequence profiles and patterns of amino acid covariation between natural and designed sequences
+
+This protocol capture is based on a benchmark developed by Ollikainen & Kortemme and referenced below.
 
 ---------
 Licensing
@@ -47,14 +51,20 @@ Please contact support@kortemmelab.ucsf if you wish to contribute towards the re
 Each protocol is accompanied by specific documentation in its protocol directory.
 
 --------------------------------------
-Protocol 1: Protocol name? todo
+Protocol 1: Fixed backbone design
 --------------------------------------
-
-Created by: Noah Ollikainen
 
 Software suite: Rosetta
 
-Protocol directory: protocols/todo
+Protocol directory: protocols/fixed_backbone
+
+--------------------------------------
+Protocol 2: Flexible backbone design using backrub ensembles
+--------------------------------------
+
+Software suite: Rosetta
+
+Protocol directory: protocols/backrub
 
 __________
 References
@@ -70,5 +80,4 @@ Analysis
 The same set of analysis scripts is used by all protocols. Conceptually, the analysis scripts should be a black box that
 is separated from the output of each protocol by an interface.
 
-The analysis scripts generates ??? metrics which can be used to evaluate the results of the covariation simulations (as
-well as a series of plots???). The scripts are described in more detail in analysis/README.rst.
+The analysis scripts calculate sequence profile similarity and covariation similarity metrics which can be used to evaluate the results of the design simulations. The scripts are described in more detail in analysis/README.rst.
