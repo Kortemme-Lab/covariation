@@ -1,0 +1,17 @@
+Flexible backbone design using backrub ensembles 
+
+Flexible backbone design that uses backrub moves to generate a conformational ensemble. 
+This protocol outputs two sets of structures; “low” structures have the lowest energy 
+conformation for each simulation and “last” structures have the last conformation that 
+was sampled in the simulation. Fixbb is used on each “last” structure to identify a low 
+energy sequence.  The value of KT was varied to generate structures with varying degrees 
+of structural variation. The following command line options were used:
+
+./backrub.linuxgccrelease –database rosetta_database –s input.pdb –resfile NATAA.res 
+–ex1 –ex2 –extrachi_cutoff 0 –backrub:mc_kt KT –backrub:ntrials 10000 –nstruct 500 
+–backrub:initial_pack
+
+Fixbb command line:
+
+./fixbb.linuxgccrelease –database rosetta_database –s input.pdb –resfile ALLAA.res –ex1 
+–ex2 –extrachi_cutoff 0 –nstruct 500 –linmem_ig 10 –no_his_his_pairE –minimize_sidechains

@@ -1,0 +1,8 @@
+Fixed backbone design
+
+This protocol performs Monte Carlo simulated annealing to optimize side-chain rotamers at 
+all positions.  Rotamers of all amino acids are allowed at any position. The following 
+command line options were used:
+
+./fixbb.linuxgccrelease –database rosetta_database –s input.pdb –resfile ALLAA.res –ex1 
+–ex2 –extrachi_cutoff 0 –nstruct 500 –linmem_ig 10 –no_his_his_pairE –minimize_sidechains
