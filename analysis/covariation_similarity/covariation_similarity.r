@@ -1,0 +1,6 @@
+pdf('covariation_similarity.pdf',width=3.5,height=6)
+par(mar=c(5, 5, 1, 1))
+a<-read.table('covariation_similarity.txt')
+boxplot(a$V1,a$V2,ylab="Covariation Similarity",col=c("#e74c3c","#3498db"),cex.lab=1.5,cex.axis=1.5,outline=F)
+text(1:2, par("usr")[3] - 0.04, labels = c("Fixed\nBackbone","Flexible\nBackbone"), xpd = TRUE, cex=1.25)
+dev.off()

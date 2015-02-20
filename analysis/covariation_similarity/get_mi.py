@@ -2,14 +2,6 @@ import sys
 import os
 import math
 import operator
-
-def median(pool):
-    copy = sorted(pool)
-    size = len(copy)
-    if size % 2 == 1:
-        return copy[(size - 1) / 2]
-    else:
-        return (copy[size/2 - 1] + copy[size/2]) / 2
         
 def get_MI(length, entropies, joint_entropies):
 
@@ -111,7 +103,7 @@ def get_MI(length, entropies, joint_entropies):
 	return MI, Z, Zp, Zpx
 	
 structs = {}
-f = open('domain_seq.txt', 'r')
+f = open('../domain_sequneces.txt', 'r')
 for line in f:
 	line = line.strip()
 	structs[line.split()[0]] = line.split()[1]
