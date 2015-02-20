@@ -47,7 +47,7 @@ PF07686
 PF08666
 PF12844
 
-The selection of these Pfam domains and their structures are described in the following paper:
+The selection of these Pfam domains and their structures is described in the following paper:
 
 Computational protein design quantifies structural constraints on amino acid covariation. 2013.
 Ollikainen N, Kortemme T. PLoS Comput Biol 9(11):e1003313. `doi: 10.1371/journal.pcbi.1003313 <http://dx.doi.org/10.1371/journal.pcbi.1003313>`_. Epub 2013 Nov 14.
