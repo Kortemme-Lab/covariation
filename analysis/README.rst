@@ -14,7 +14,7 @@ The usage of these scripts is as follows:
 
   python covariation_similarity.py ../../output/fixed_backbone/ ../../output/backrub/ > covariation_similarity.txt
   python profile_similarity.py ../../output/fixed_backbone/ ../../output/backrub/ > profile_similarity.txt
-  python sequence_recovery.py ../../output/fixbb_sequences/ ../../output/backrub_sequences/ > sequence_recovery.txt
+  python sequence_recovery.py ../../output/fixed_backbone/ ../../output/backrub/ > sequence_recovery.txt
 
 R scripts are provided to visualize the output. The R scripts can be run as follows:
 
