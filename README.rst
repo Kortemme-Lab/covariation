@@ -1,6 +1,6 @@
-====================================
+==========================================
 Sequence profile and covariation benchmark
-====================================
+==========================================
 
 Evolutionary pressures on protein structure and function have shaped the amino acid sequences of today's naturally occurring proteins. Consequently, the sequences of natural proteins are nearly optimal for their structures. Natural protein sequences therefore provide valuable information for evaluating the accuracy of computational protein design. The purpose of this benchmark is to evaluate the extent to which protein design can recapitulate properties of naturally occurring proteins, including amino acid sequence preferences (“sequence profiles”) and patterns of amino acid covariation.
 
@@ -16,7 +16,7 @@ This protocol capture is based on a benchmark developed by Ollikainen & Kortemme
 Licensing
 ---------
 
-The contents of the repository *where possible* are licensed under the MIT License. The license only applies to files which either: i) include the license statement; or ii) which are explicitly listed in some file in the repository as being covered by the license. All other files may be covered under a separate license. The LICENSE file in the root of this repository is present only for the convenience of the user to indicate the license which covers any novel content presented herein.
+The novel content in this repository is licensed according to LICENSE.
 
 -------------------------
 Downloading the benchmark
@@ -58,9 +58,9 @@ Software suite: Rosetta
 
 Protocol directory: protocols/fixed_backbone
 
---------------------------------------
+------------------------------------------------------------
 Protocol 2: Flexible backbone design using backrub ensembles
---------------------------------------
+------------------------------------------------------------
 
 Software suite: Rosetta
 
