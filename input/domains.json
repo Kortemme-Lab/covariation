@@ -1,0 +1,329 @@
+{
+    "domains": [
+        {
+            "Amino acid length": "60", 
+            "PDB ID": "2O37", 
+            "Pfam ID": "PF00226", 
+            "Pfam Name": "DnaJ", 
+            "SCOP class": "a", 
+            "Total # of sequences": "19122"
+        }, 
+        {
+            "Amino acid length": "47", 
+            "PDB ID": "1GUU", 
+            "Pfam ID": "PF00249", 
+            "Pfam Name": "Myb_DNA-binding", 
+            "SCOP class": "a", 
+            "Total # of sequences": "9398"
+        }, 
+        {
+            "Amino acid length": "89", 
+            "PDB ID": "3JVL", 
+            "Pfam ID": "PF00439", 
+            "Pfam Name": "Bromodomain", 
+            "SCOP class": "a", 
+            "Total # of sequences": "4483"
+        }, 
+        {
+            "Amino acid length": "77", 
+            "PDB ID": "2ZXJ", 
+            "Pfam ID": "PF00486", 
+            "Pfam Name": "Trans_reg_C", 
+            "SCOP class": "a", 
+            "Total # of sequences": "35180"
+        }, 
+        {
+            "Amino acid length": "68", 
+            "PDB ID": "1T8K", 
+            "Pfam ID": "PF00550", 
+            "Pfam Name": "PP-binding", 
+            "SCOP class": "a", 
+            "Total # of sequences": "28748"
+        }, 
+        {
+            "Amino acid length": "127", 
+            "PDB ID": "1TZV", 
+            "Pfam ID": "PF01029", 
+            "Pfam Name": "NusB", 
+            "SCOP class": "a", 
+            "Total # of sequences": "5275"
+        }, 
+        {
+            "Amino acid length": "87", 
+            "PDB ID": "3GVA", 
+            "Pfam ID": "PF01035", 
+            "Pfam Name": "DNA_binding_1", 
+            "SCOP class": "a", 
+            "Total # of sequences": "5230"
+        }, 
+        {
+            "Amino acid length": "88", 
+            "PDB ID": "2A0B", 
+            "Pfam ID": "PF01627", 
+            "Pfam Name": "Hpt", 
+            "SCOP class": "a", 
+            "Total # of sequences": "7684"
+        }, 
+        {
+            "Amino acid length": "70", 
+            "PDB ID": "3FYM", 
+            "Pfam ID": "PF12844", 
+            "Pfam Name": "HTH_19", 
+            "SCOP class": "a", 
+            "Total # of sequences": "9622"
+        }, 
+        {
+            "Amino acid length": "111", 
+            "PDB ID": "1MVO", 
+            "Pfam ID": "PF00072", 
+            "Pfam Name": "Response_reg", 
+            "SCOP class": "a/b", 
+            "Total # of sequences": "103232"
+        }, 
+        {
+            "Amino acid length": "104", 
+            "PDB ID": "1FB0", 
+            "Pfam ID": "PF00085", 
+            "Pfam Name": "Thioredoxin", 
+            "SCOP class": "a/b", 
+            "Total # of sequences": "16281"
+        }, 
+        {
+            "Amino acid length": "92", 
+            "PDB ID": "1GN0", 
+            "Pfam ID": "PF00581", 
+            "Pfam Name": "Rhodanese", 
+            "SCOP class": "a/b", 
+            "Total # of sequences": "19885"
+        }, 
+        {
+            "Amino acid length": "137", 
+            "PDB ID": "2Z3V", 
+            "Pfam ID": "PF00582", 
+            "Pfam Name": "Usp", 
+            "SCOP class": "a/b", 
+            "Total # of sequences": "15546"
+        }, 
+        {
+            "Amino acid length": "130", 
+            "PDB ID": "1JL3", 
+            "Pfam ID": "PF01451", 
+            "Pfam Name": "LMWPc", 
+            "SCOP class": "a/b", 
+            "Total # of sequences": "5201"
+        }, 
+        {
+            "Amino acid length": "63", 
+            "PDB ID": "1WVN", 
+            "Pfam ID": "PF00013", 
+            "Pfam Name": "KH_1", 
+            "SCOP class": "a+b", 
+            "Total # of sequences": "11484"
+        }, 
+        {
+            "Amino acid length": "71", 
+            "PDB ID": "2X1B", 
+            "Pfam ID": "PF00076", 
+            "Pfam Name": "RRM_1", 
+            "SCOP class": "a+b", 
+            "Total # of sequences": "31837"
+        }, 
+        {
+            "Amino acid length": "76", 
+            "PDB ID": "1CZP", 
+            "Pfam ID": "PF00111", 
+            "Pfam Name": "Fer2", 
+            "SCOP class": "a+b", 
+            "Total # of sequences": "11941"
+        }, 
+        {
+            "Amino acid length": "138", 
+            "PDB ID": "1Z2U", 
+            "Pfam ID": "PF00179", 
+            "Pfam Name": "UQ_con", 
+            "SCOP class": "a+b", 
+            "Total # of sequences": "6107"
+        }, 
+        {
+            "Amino acid length": "69", 
+            "PDB ID": "2BWF", 
+            "Pfam ID": "PF00240", 
+            "Pfam Name": "Ubiquitin", 
+            "SCOP class": "a+b", 
+            "Total # of sequences": "8316"
+        }, 
+        {
+            "Amino acid length": "95", 
+            "PDB ID": "2PPN", 
+            "Pfam ID": "PF00254", 
+            "Pfam Name": "FKBP_C", 
+            "SCOP class": "a+b", 
+            "Total # of sequences": "11034"
+        }, 
+        {
+            "Amino acid length": "52", 
+            "PDB ID": "1BXY", 
+            "Pfam ID": "PF00327", 
+            "Pfam Name": "Ribosomal_L30", 
+            "SCOP class": "a+b", 
+            "Total # of sequences": "3324"
+        }, 
+        {
+            "Amino acid length": "84", 
+            "PDB ID": "1PTF", 
+            "Pfam ID": "PF00381", 
+            "Pfam Name": "PTS-HPr", 
+            "SCOP class": "a+b", 
+            "Total # of sequences": "5246"
+        }, 
+        {
+            "Amino acid length": "68", 
+            "PDB ID": "1CTF", 
+            "Pfam ID": "PF00542", 
+            "Pfam Name": "Ribosomal_L12", 
+            "SCOP class": "a+b", 
+            "Total # of sequences": "3474"
+        }, 
+        {
+            "Amino acid length": "96", 
+            "PDB ID": "1OAP", 
+            "Pfam ID": "PF00691", 
+            "Pfam Name": "OmpA", 
+            "SCOP class": "a+b", 
+            "Total # of sequences": "11815"
+        }, 
+        {
+            "Amino acid length": "89", 
+            "PDB ID": "3BR8", 
+            "Pfam ID": "PF00708", 
+            "Pfam Name": "Acylphosphatase", 
+            "SCOP class": "a+b", 
+            "Total # of sequences": "3057"
+        }, 
+        {
+            "Amino acid length": "123", 
+            "PDB ID": "2QLC", 
+            "Pfam ID": "PF04002", 
+            "Pfam Name": "RadC", 
+            "SCOP class": "a+b", 
+            "Total # of sequences": "3253"
+        }, 
+        {
+            "Amino acid length": "48", 
+            "PDB ID": "2O9S", 
+            "Pfam ID": "PF00018", 
+            "Pfam Name": "SH3_1", 
+            "SCOP class": "b", 
+            "Total # of sequences": "8993"
+        }, 
+        {
+            "Amino acid length": "81", 
+            "PDB ID": "1TEN", 
+            "Pfam ID": "PF00041", 
+            "Pfam Name": "Fn3", 
+            "SCOP class": "b", 
+            "Total # of sequences": "26172"
+        }, 
+        {
+            "Amino acid length": "87", 
+            "PDB ID": "3F04", 
+            "Pfam ID": "PF00168", 
+            "Pfam Name": "C2", 
+            "SCOP class": "b", 
+            "Total # of sequences": "11697"
+        }, 
+        {
+            "Amino acid length": "103", 
+            "PDB ID": "1UNQ", 
+            "Pfam ID": "PF00169", 
+            "Pfam Name": "PH", 
+            "SCOP class": "b", 
+            "Total # of sequences": "8137"
+        }, 
+        {
+            "Amino acid length": "67", 
+            "PDB ID": "3I2Z", 
+            "Pfam ID": "PF00313", 
+            "Pfam Name": "CSD", 
+            "SCOP class": "b", 
+            "Total # of sequences": "9848"
+        }, 
+        {
+            "Amino acid length": "95", 
+            "PDB ID": "1FQT", 
+            "Pfam ID": "PF00355", 
+            "Pfam Name": "Rieske", 
+            "SCOP class": "b", 
+            "Total # of sequences": "9153"
+        }, 
+        {
+            "Amino acid length": "68", 
+            "PDB ID": "2EVB", 
+            "Pfam ID": "PF00364", 
+            "Pfam Name": "Biotin_lipoyl", 
+            "SCOP class": "b", 
+            "Total # of sequences": "16853"
+        }, 
+        {
+            "Amino acid length": "67", 
+            "PDB ID": "3GQS", 
+            "Pfam ID": "PF00498", 
+            "Pfam Name": "FHA", 
+            "SCOP class": "b", 
+            "Total # of sequences": "7247"
+        }, 
+        {
+            "Amino acid length": "87", 
+            "PDB ID": "2H3L", 
+            "Pfam ID": "PF00595", 
+            "Pfam Name": "PDZ", 
+            "SCOP class": "b", 
+            "Total # of sequences": "12568"
+        }, 
+        {
+            "Amino acid length": "83", 
+            "PDB ID": "3MQI", 
+            "Pfam ID": "PF01833", 
+            "Pfam Name": "TIG", 
+            "SCOP class": "b", 
+            "Total # of sequences": "4814"
+        }, 
+        {
+            "Amino acid length": "80", 
+            "PDB ID": "1AQT", 
+            "Pfam ID": "PF02823", 
+            "Pfam Name": "ATP-synt_DE_N", 
+            "SCOP class": "b", 
+            "Total # of sequences": "3782"
+        }, 
+        {
+            "Amino acid length": "91", 
+            "PDB ID": "1U2H", 
+            "Pfam ID": "PF07679", 
+            "Pfam Name": "I-set", 
+            "SCOP class": "b", 
+            "Total # of sequences": "29272"
+        }, 
+        {
+            "Amino acid length": "116", 
+            "PDB ID": "2PND", 
+            "Pfam ID": "PF07686", 
+            "Pfam Name": "v-set", 
+            "SCOP class": "b", 
+            "Total # of sequences": "9255"
+        }, 
+        {
+            "Amino acid length": "60", 
+            "PDB ID": "1UCS", 
+            "Pfam ID": "PF08666", 
+            "Pfam Name": "SAF", 
+            "SCOP class": "b", 
+            "Total # of sequences": "3256"
+        }
+    ], 
+    "information": "\nThis dataset was taken from Table 1 in the Ollikainen and Kortemme paper [1], doi: 10.1371/journal.pcbi.1003313.", 
+    "references": {
+        "1": "PMID:24244128"
+    }, 
+    "version": "This dataset was last updated on 2015-04-07."
+}
