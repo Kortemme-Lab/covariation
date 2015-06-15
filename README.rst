@@ -70,6 +70,13 @@ __________
 References
 __________
 
+
+The latest release of this repository: |releasedoi|
+
+.. |releasedoi| image:: https://zenodo.org/badge/doi/10.5281/zenodo.18594.svg  
+   :target: http://dx.doi.org/10.5281/zenodo.18594
+   
+
 Computational protein design quantifies structural constraints on amino acid covariation. 2013.
 Ollikainen N, Kortemme T. PLoS Comput Biol 9(11):e1003313. `doi: 10.1371/journal.pcbi.1003313 <http://dx.doi.org/10.1371/journal.pcbi.1003313>`_. Epub 2013 Nov 14.
 
