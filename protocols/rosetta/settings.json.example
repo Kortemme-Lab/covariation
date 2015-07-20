@@ -1,0 +1,4 @@
+{
+    "rosetta_installation_path"   : "/home/me/rosetta",
+    "rosetta_binary_type"         : ".linuxgccrelease"
+}
