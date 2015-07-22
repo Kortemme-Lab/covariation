@@ -2,7 +2,7 @@
 
 # The MIT License (MIT)
 #
-# Copyright (c) 2015 Noah Ollikainen, Samuel Thompson, Shane O'Connor
+# Copyright (c) 2015 Noah Ollikainen, Shane O'Connor
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -87,6 +87,7 @@ from utils.pdb import PDB
 from utils.get_mi import create_mi_file
 from utils.rplot import run_r_script
 from covariation_similarity.covariation_similarity import compute_overlap
+from profile_similarity.profile_similarity import get_covarying_pairs, get_rosetta_sequence, get_natural_sequences, background
 
 
 class Analyzer(object):
@@ -99,10 +100,21 @@ class Analyzer(object):
         self.overwrite_files = overwrite_files
         self.expectn = expectn
         self.domain_sequences = None
+        self.native_sequences = None
         self.analysis_file_prefix = analysis_file_prefix
 
-        # Set up which benchmarks we will be analyzing
+        if not os.path.exists(self.output_directory):
+            try:
+                os.makedirs(self.output_directory)
+            except: pass
+            if not os.path.exists(self.output_directory):
+                raise Exception('An exception occurred creating the output directory {0}.'.format(output_directory)) 
+
+        # Read in the domain and native sequence data
         self.get_domain_sequences(read_file('domain_sequences.txt'))
+        self.get_native_sequences(os.path.join('sequence_recovery', 'native_sequences'))
+
+        # Set up which benchmarks we will be analyzing
         self.benchmark_details = Analyzer.load_benchmark_json_files(input_jsons, benchmark_ids)
         self.summary_stats = {}
         for k in self.benchmark_details.keys():
@@ -195,6 +207,15 @@ class Analyzer(object):
         self.domain_sequences = domain_sequences
 
 
+    def get_native_sequences(self, native_sequences_directory):
+        native_sequences = {}
+        for filename in glob.glob(os.path.join(native_sequences_directory, '*.fasta.txt')):
+            lines = [l.strip() for l in get_file_lines(filename) if l.strip() and l[0] != ">"]
+            assert(len(lines) == 1)
+            native_sequences[os.path.split(filename)[1].split('.')[0]] = lines[0]
+        self.native_sequences = native_sequences
+
+
     def create_fasta_file(self, benchmark_id, input_directory, file_filter):
         expectn = self.expectn
         print('Folder: {0}'.format(os.path.split(input_directory)[1]))
@@ -205,7 +226,7 @@ class Analyzer(object):
                 num_fasta_headers = len([1 for l in get_file_lines(output_fasta_filepath) if l.startswith('>')])
                 if expectn != num_fasta_headers:
                     raise colortext.Exception('Expected {0} records in {1} but read {2}.'.format(expectn, output_fasta_filepath, num_fasta_headers))
-            print('FASTA file exists. Skipping generation.' + input_directory)
+            print('FASTA file exists. Skipping generation.')
             return output_fasta_filepath
 
         fasta_records = []
@@ -242,6 +263,7 @@ class Analyzer(object):
     # Metric functions
 
     def compute_covariation_similarity(self, domain, mutual_information_filepath):
+        '''Computes the covariation similarity for a domain based on the mutual information file.'''
         struct = self.domain_sequences[domain]
         natural_covariation_file = os.path.join('natural_covariation', domain + '_80.mi')
         indices_file = os.path.join('indices', struct + ".indices")
@@ -253,13 +275,160 @@ class Analyzer(object):
         return overlap
 
 
+    def compute_profile_similarity(self, domain, mutual_information_filepath, fasta_file):
+        '''Computes the profile similarity for a domain based on the mutual information and FASTA file.'''
+
+        struct = self.domain_sequences[domain]
+        natural_covariation_file = os.path.join('natural_covariation', domain + '_80.mi')
+        indices_file = os.path.join('indices', struct + ".indices")
+        natural_alignments_file = os.path.join('natural_alignments', domain + ".align.80")
+        if not os.path.exists(natural_covariation_file):
+            raise Exception('Error: The file "{0}" does not exist.'.format(natural_covariation_file))
+        if not os.path.exists(indices_file):
+            raise Exception('Error: The file "{0}" does not exist.'.format(indices_file))
+        if not os.path.exists(natural_alignments_file):
+            raise Exception('Error: The file "{0}" does not exist.'.format(natural_alignments_file))
+
+        natural_pairs, positions = get_covarying_pairs(natural_covariation_file, mutual_information_filepath)
+        designed_sequences, designed_indices = get_rosetta_sequence(fasta_file, indices_file)
+        natural_sequences = get_natural_sequences(natural_alignments_file)
+
+        similarity_score_mean = []
+        sorted_positions = sorted(list(positions))
+
+        P = {}
+        Q = {}
+
+        aa = 'ACDEFGHIKLMNPQRSTVWY'
+        single = {}
+        for a in aa:
+            single[a] = 0.0
+
+        for i in sorted_positions:
+            P[i] = single.copy()
+            Q[i] = single.copy()
+
+        count_Q = 0.0
+        for index in range(0, len(designed_sequences)):
+            count_Q += 1.0
+            for i in sorted_positions:
+                Q[i][designed_sequences[index][designed_indices[i]]] += 1.0
+
+        count_P = 0.0
+        for index in range(0, len(natural_sequences)):
+            count_P += 1.0
+            for i in sorted_positions:
+                P[i][natural_sequences[index][i]] += 1.0
+
+        overall_sum = 0
+        overall_count = 0.0
+        for i in P:
+            sum_PR = 0.0
+            sum_QR = 0.0
+            sum_bg_RR = 0.0
+            sum_R_RR = 0.0
+            for ii in P[i]:
+                P_i = float(P[i][ii]) / float(count_P)
+                Q_i = float(Q[i][ii]) / float(count_Q)
+                R_i = P_i * 0.5 + Q_i * 0.5
+
+                bg_i = background[ii]
+                RR_i = bg_i * 0.5 + R_i * 0.5
+
+                if R_i != 0 and Q_i != 0:
+                    sum_PR += math.log( (Q_i / R_i), 2 ) * Q_i
+
+                if R_i != 0 and P_i != 0:
+                    sum_QR += math.log( (P_i / R_i), 2) * P_i
+
+                if RR_i != 0 and bg_i != 0:
+                    sum_bg_RR += math.log( (bg_i / RR_i), 2) * bg_i
+
+                if RR_i != 0 and R_i != 0:
+                    sum_R_RR += math.log( (R_i / RR_i), 2) * R_i
+
+            divergence = float(sum_PR + sum_QR) * 0.5
+            significance = float(sum_bg_RR + sum_R_RR) * 0.5
+            overall_sum += ((1 - divergence) * (1 + significance)) * 0.5
+            overall_count += 1.0
+
+        return float(overall_sum) / float(overall_count)
+
+
+    def compute_sequence_recovery(self, domain, fasta_file):
+
+        struct = self.domain_sequences[domain]
+        lines = get_file_lines(fasta_file)
+
+        predicted_sequences = []
+        seq = ''
+        for l in lines:
+            if l.strip():
+                if l[0] == '>':
+                    if seq:
+                        predicted_sequences.append(seq)
+                        seq = ''
+                else:
+                    seq += l.strip()
+        predicted_sequences.append(seq)
+        #pprint.pprint(predicted_sequences)
+
+        #predicted_sequences = [l.strip() for l in lines if l.strip() and l[0] != '>']
+        #print(len(predicted_sequences))
+        assert(len(set(map(len, predicted_sequences))) == 1)
+        if self.expectn != None:
+            assert(len(predicted_sequences) == self.expectn)
+
+        native_sequence = self.native_sequences[struct]
+        # todo: These are hacks for the general Rosetta behavior for the Rosetta protocols in this capture where both
+        #       the N-terminal residue of 1TEN_A and the C-terminal residue of 1UNQ are discarded due to missing ATOM
+        #       records. This removal can be avoided using the '-ignore_zero_occupancy false' Rosetta option.
+        #       If the length of the native sequence does not match the length of the predicted sequences, an error will
+        #       be printed out below.
+        if struct == '1TEN_A':
+            native_sequence = native_sequence[1:]
+        elif struct == '1UNQ_A':
+            native_sequence = native_sequence[:-1]
+
+        #print(native_sequence)
+        if not len(native_sequence) == len(predicted_sequences[0]):
+            colortext.error('The natural sequence length ({0}) does not match the predicted sequence lengths ({1}).'.format(len(native_sequence), len(predicted_sequences[0])))
+            colortext.error('This may indicate an error in your method or could be due to truncations of the natural sequence in the analysis code. Please check the code near this error message in {0}.'.format(os.path.basename(__file__)))
+            print('Native sequence    : {0}'.format(native_sequence))
+            for x in range(min(10, len(predicted_sequences))):
+                print('Predicted sequence : {0}'.format(predicted_sequences[x]))
+            native_sequence = native_sequence[:-1]
+        sequence_length = min(len(native_sequence), len(predicted_sequences[0]))
+        sum = 0
+        for predicted_sequence in predicted_sequences:
+            match = 0
+            total = 0
+            for i in range(0, sequence_length):
+                if predicted_sequence[i] == native_sequence[i]:
+                    match += 1
+                total += 1
+            sum += float(match) / float(total)
+        #colortext.warning('Sequence recovery: {0}'.format(float(sum) / float(len(predicted_sequences))))
+        return float(sum) / float(len(predicted_sequences))
+
+
+
+
+
+
     # Main function
 
 
     def run(self):
         covariation_similarities = {}
+        profile_similarities = {}
+        sequence_recoveries = {}
+        average_entropies = {}
         for benchmark_id, benchmark_details in sorted(self.benchmark_details.iteritems()):
             covariation_similarities[benchmark_id] = {}
+            profile_similarities[benchmark_id] = {}
+            sequence_recoveries[benchmark_id] = {}
+            average_entropies[benchmark_id] = {}
             input_directory = benchmark_details['root_path']
             assert(os.path.exists(input_directory))
             file_filter = benchmark_details['file_filter']
@@ -275,10 +444,17 @@ class Analyzer(object):
                         domain = os.path.split(sub_dir)[1].split('_')[0]
                         indices_directory = os.path.abspath('indices')
                         mutual_information_filepath = os.path.join(sub_dir, Analyzer.get_normalized_run_file(benchmark_id, '.mi'))
-                        if self.overwrite_files or not(os.path.exists(mutual_information_filepath)):
-                            mi_file = create_mi_file(domain, read_file(fasta_file), self.domain_sequences, indices_directory)
+                        entropies_filepath = os.path.join(sub_dir, Analyzer.get_normalized_run_file(benchmark_id, '.entropies'))
+                        if self.overwrite_files or not(os.path.exists(mutual_information_filepath)) or not(os.path.exists(entropies_filepath)):
+                            mi_file, entropies = create_mi_file(domain, read_file(fasta_file), self.domain_sequences, indices_directory)
                             write_file(mutual_information_filepath, mi_file)
+                            write_file(entropies_filepath, json.dumps(entropies))
+
+                        # Compute the benchmark metrics for each domain
                         covariation_similarities[benchmark_id][domain] = self.compute_covariation_similarity(domain, mutual_information_filepath)
+                        profile_similarities[benchmark_id][domain] = self.compute_profile_similarity(domain, mutual_information_filepath, fasta_file)
+                        sequence_recoveries[benchmark_id][domain] = self.compute_sequence_recovery(domain, fasta_file)
+                        average_entropies[benchmark_id][domain] = numpy.mean(json.loads(read_file(entropies_filepath)).values())
                     else:
                         print('Mutual information (.mi) file exists. Skipping generation.' + input_directory)
                     print('')
@@ -290,69 +466,128 @@ class Analyzer(object):
             raise Exception('There were no domains common to the specified benchmark runs.')
         common_domains = sorted(common_domains)
 
+        colortext.message('Creating analysis plots in {0}.'.format(self.output_directory))
         self.analyze_covariation_similarity(covariation_similarities, common_domains)
+        self.analyze_profile_similarity(profile_similarities, common_domains)
+        self.analyze_sequence_recovery(sequence_recoveries, common_domains)
+        self.analyze_sequence_entropy(average_entropies, common_domains)
 
-        pprint.pprint(self.summary_stats)
 
+        # Compute the best and worst values for each metric. In all of the metrics, it happens that larger values indicate
+        # an improvement.
+        min_max = {}
+        for k, v in self.summary_stats.iteritems():
+            for metric, value in sorted(v.iteritems()):
+                if not min_max.get(metric):
+                    min_max[metric] = (value, value)
+                else:
+                    min_max[metric] = (min(min_max[metric][0], value), max(min_max[metric][1], value))
+        pprint.pprint(min_max)
+
+        # Print the summary (mean) value for each metric for all of the benchmarks
+        # We color-code the values to highlight the best (green) and worst (red) values
+        colortext.message('\nMetric values for the benchmarks.')
+        for k, v in sorted(self.summary_stats.iteritems()):
+            colortext.warning(k)
+            metric_name_length = max(map(len, v.keys()))
+            for metric, value in sorted(v.iteritems()):
+                value_str = str(value)
+                if min_max[metric][0] == value:
+                    value_str = colortext.mred(value_str)
+                elif min_max[metric][1] == value:
+                    value_str = colortext.mgreen(value_str)
+                print('  {0} : {1}'.format(metric.ljust(metric_name_length), value_str))
+        print('')
 
     def analyze_covariation_similarity(self, covariation_similarities, common_domains):
         '''This function creates a text file with the covariation similarities by benchmark and domain and runs R to
            generate boxplots of the covariation similarities.'''
+        self.generic_analysis_function(covariation_similarities, common_domains, 'covariation_similarity', 'Covariation similarity')
+
+
+    def analyze_profile_similarity(self, profile_similarities, common_domains):
+        self.generic_analysis_function(profile_similarities, common_domains, 'profile_similarity', 'Profile similarity')
+
+
+    def analyze_sequence_recovery(self, sequence_recoveries, common_domains):
+        self.generic_analysis_function(sequence_recoveries, common_domains, 'sequence_recovery', 'Sequence recovery')
+
+
+    def analyze_sequence_entropy(self, average_entropies, common_domains):
+        self.generic_analysis_function(average_entropies, common_domains, 'sequence_entropy', 'Sequence entropy')
+
+
+
+
+    def generic_analysis_function(self, metric_data, common_domains, metric_column_name, metric_column_title):
+        '''This function creates a text file with the metric data over the benchmarks and domains and runs R to
+           generate boxplots of the metric data. The mean of the metrics over each benchmark is computed and added to
+           the summary_stats dictionary.
+        '''
+
+        # Create the R data frame
         data_frame_values = []
-        for benchmark_id, domain_values in sorted(covariation_similarities.iteritems()):
-            for domain, covariation_similarity in sorted(domain_values.iteritems()):
+        for benchmark_id, domain_values in sorted(metric_data.iteritems()):
+            for domain, metric_value in sorted(domain_values.iteritems()):
                 benchmark_details = self.benchmark_details[benchmark_id]
                 method = benchmark_details['method']
                 if benchmark_details.get('kT') != None:
                     method += ', kT {0}'.format(benchmark_details.get('kT'))
-                data_frame_values.append((benchmark_details['benchmark'], method, domain, covariation_similarity))
-
+                data_frame_values.append((benchmark_details['benchmark'], method, domain, metric_value))
         benchmark_column = "','".join(d[0] for d in data_frame_values)
         method_column = "','".join(d[1] for d in data_frame_values)
         domain_column = "','".join(d[2] for d in data_frame_values)
-        covariation_similarity_column = ",".join(str(d[3]) for d in data_frame_values)
+        metric_data_column = ",".join(str(d[3]) for d in data_frame_values)
 
-        covariation_graph_commands = '''
-p <- ggplot(data = benchmark_data, aes(factor(method), covariation_similarity, fill=method))
+        # Create the R script
+        boxplot_generation_commands = '''
+p <- ggplot(data = benchmark_data, aes(factor(method), {0}, fill=method))
 p <- p + stat_boxplot(geom ='errorbar', linetype="solid", width = 0.25, position = "dodge")
-p <- p + stat_boxplot(geom = "boxplot", linetype="solid", position = "dodge", width = 0.60, na.rm = TRUE) + xlab("Method") + ylab("Covariation similarity") + facet_grid(.~benchmark) + theme(legend.position="none")
+p <- p + stat_boxplot(geom = "boxplot", linetype="solid", position = "dodge", width = 0.60, na.rm = TRUE) + xlab("Method") + ylab("{1}") + facet_grid(.~benchmark) + theme(legend.position="none")
 p
-'''
+'''.format(metric_column_name, metric_column_title)
 
-        covariation_similarity_r_script = '''
+        analysis_file_prefix = self.analysis_file_prefix
+        boxplot_r_script = '''
 library(ggplot2)
 library(grid)
 
-benchmark_data <- data.frame(benchmark=c('{0}'),
-                             method=c('{1}'),
-                             domain=c('{2}'),
-                             covariation_similarity=c({3}))
+benchmark_data <- data.frame(benchmark=c('%(benchmark_column)s'),
+                             method=c('%(method_column)s'),
+                             domain=c('%(domain_column)s'),
+                             %(metric_column_name)s=c(%(metric_data_column)s))
 
-pdf('{4}covariation_similarity.pdf')
-{5}
+pdf('%(analysis_file_prefix)s%(metric_column_name)s.pdf')
+%(boxplot_generation_commands)s
 dev.off()
 
-png('{4}covariation_similarity.png')
-{5}
+png('%(analysis_file_prefix)s%(metric_column_name)s.png')
+%(boxplot_generation_commands)s
 dev.off()
-'''.format(benchmark_column, method_column, domain_column, covariation_similarity_column, self.analysis_file_prefix, covariation_graph_commands, self.analysis_file_prefix, covariation_graph_commands)
+''' % locals()
 
-        r_script_filepath = os.path.join(self.output_directory, '{0}covariation_similarity.R'.format(self.analysis_file_prefix))
-        write_file(r_script_filepath, covariation_similarity_r_script)
+
+
+        r_script_filepath = os.path.join(self.output_directory, '{0}{1}.R'.format(self.analysis_file_prefix, metric_column_name))
+        write_file(r_script_filepath, boxplot_r_script)
+
+        # Run the R script
         run_r_script(r_script_filepath, cwd = self.output_directory)
 
-        covariation_xy_file_lines = []
-        benchmark_ids = sorted(covariation_similarities.keys())
-        covariation_xy_file_lines.append('\t'.join(['Domain'] + benchmark_ids))
+        # Create a readable tabular file with the raw data
+        metric_data_xy_file_lines = []
+        benchmark_ids = sorted(metric_data.keys())
+        metric_data_xy_file_lines.append('\t'.join(['Domain'] + benchmark_ids))
         for domain in common_domains:
             columns = [domain]
             for benchmark_id in benchmark_ids:
-                columns.append(covariation_similarities[benchmark_id][domain])
-            covariation_xy_file_lines.append('\t'.join(map(str, columns)))
-        write_file(os.path.join(self.output_directory, '{0}covariation_similarity_xy.txt'.format(self.analysis_file_prefix)), '\n'.join(covariation_xy_file_lines))
+                columns.append(metric_data[benchmark_id][domain])
+            metric_data_xy_file_lines.append('\t'.join(map(str, columns)))
+        write_file(os.path.join(self.output_directory, '{0}{1}_xy.txt'.format(self.analysis_file_prefix, metric_column_name)), '\n'.join(metric_data_xy_file_lines))
 
-        for benchmark_id, covariation_similarity_values in sorted(covariation_similarities.iteritems()):
-            self.summary_stats[benchmark_id]['Covariation similarity'] = numpy.mean(covariation_similarity_values.values())
+        # Compute the mean of the values per benchmark
+        for benchmark_id, metric_values in sorted(metric_data.iteritems()):
+            self.summary_stats[benchmark_id][metric_column_title] = numpy.mean(metric_values.values())
 
 
 
