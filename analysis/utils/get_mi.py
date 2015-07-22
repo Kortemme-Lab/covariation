@@ -24,6 +24,7 @@ import sys
 import os
 import math
 import operator
+import numpy
 from fsio import read_file
 
 def get_MI(length, entropies, joint_entropies):
@@ -83,7 +84,7 @@ def get_MI(length, entropies, joint_entropies):
 
     mean_corrected_MI_i = {}
     for i in range(0, length):
-        sum = float(0.0)
+        xsum = float(0.0)
         count = float(0.0)
         for j in range(0, length):
             if i != j:
@@ -91,15 +92,15 @@ def get_MI(length, entropies, joint_entropies):
                 ji = str(j)+" "+str(i)
                 if ij in corrected_MI:
                     count += 1.0
-                    sum += corrected_MI[ij]
+                    xsum += corrected_MI[ij]
                 else:
                     count += 1.0
-                    sum += corrected_MI[ji]
-        mean_corrected_MI_i[i] = sum / count
+                    xsum += corrected_MI[ji]
+        mean_corrected_MI_i[i] = xsum / count
 
     stddev_corrected_MI_i = {}
     for i in range(0, length):
-        sum = float(0.0)
+        xsum = float(0.0)
         count = float(0.0)
         for j in range(0, length):
             if i != j:
@@ -107,12 +108,12 @@ def get_MI(length, entropies, joint_entropies):
                 ji = str(j)+" "+str(i)
                 if ij in corrected_MI:
                     count += 1.0
-                    sum += (mean_corrected_MI_i[i] - corrected_MI[ij])**2
+                    xsum += (mean_corrected_MI_i[i] - corrected_MI[ij])**2
                 else:
                     count += 1.0
-                    sum += (mean_corrected_MI_i[i] - corrected_MI[ji])**2
+                    xsum += (mean_corrected_MI_i[i] - corrected_MI[ji])**2
 
-        stddev_corrected_MI_i[i] = math.sqrt(sum / count)
+        stddev_corrected_MI_i[i] = math.sqrt(xsum / count)
 
     Zpx = {}
     for ij in corrected_MI:
@@ -211,13 +212,13 @@ def compute_mi(pfam_indices, fasta_file_contents, expectn = None):
         for seq in sequences:
             counts[i][seq[i]] += 1
         frequencies[i] = single.copy()
-        sum = 0
+        xsum = 0
         for char in frequencies[i]:
             freq = float(counts[i][char]) / num_sequences
             frequencies[i][char] = freq
             if freq > 0:
-                sum += -1 * freq * math.log(freq,20)
-        entropies[i] = sum
+                xsum += -1 * freq * math.log(freq,20)
+        entropies[i] = xsum
 
     joint_entropies = {}
 
@@ -243,5 +244,5 @@ def compute_mi(pfam_indices, fasta_file_contents, expectn = None):
         if Zp[a] < 0:
             Zpx[a] = -1 * Zpx[a]
         s.append(ungapped_indices[i]+"\t"+ungapped_indices[j]+"\t"+str(Z[a])+"\t"+str(Zp[a])+"\t"+str(Zpx[a])+"\t"+str(joint_entropies[a])+"\t"+str(entropies[i])+"\t"+str(entropies[j])+"\n")
-    return ''.join(s)
+    return ''.join(s), entropies
 
