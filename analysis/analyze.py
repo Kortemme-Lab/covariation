@@ -34,15 +34,20 @@ The scripts used to run the Rosetta protocols on the Sun Grid Engine cluster sys
 need to create the JSON files using that configuration. The JSON file is a mapping from benchmark descriptions to regular
 expressions used to identify the output files. An example benchmarks.json can be found in this folder (benchmarks.json.example).
 
-output_directory specifies the folder where the analysis files will be created.
 
 Usage:
-    analyze.py [options] <input_directory> <output_directory>
+    analyze.py [options] (-o OUTPUT_DIRECTORY) [--benchmark=BENCHMARK ...] (JSON_FILES ...)
 
 Options:
 
-    --run RUNID -r RUNID
-        Runs are defined in the benchmarks.json file. These values define a list of files which are then used as input
+    --out OUTPUT_DIRECTORY -o OUTPUT_DIRECTORY
+        The folder where the analysis files will be created.
+
+    --prefix PREFIX
+       If this option is supplied then output filenames will use this as a prefix.
+
+    --benchmark BENCHMARK -b BENCHMARK
+        Benchmark runs are defined in the benchmarks.json file. These values define a list of files which are then used as input
         for the analysis scripts. For example, in benchmarks.json.example, one valid argument to --run would be "kT = 0.9".
         If this option is omitted then analysis will be run for all benchmarks list in benchmarks.json.
 
@@ -63,120 +68,291 @@ import collections
 import contextlib
 import math
 import numpy
+import shutil
+import time
+
+import traceback
+import copy
 import os
 import re
-import shutil
+import glob
 import sys
-import time
 import json
+import pprint
 
 from libraries import docopt
 from libraries import colortext
 from utils.fsio import read_file, write_file, get_file_lines
 from utils.pdb import PDB
-from utils.get_mi import get_domain_sequences, create_mi_file# compute_mi, get_domain_sequences, read_indices
+from utils.get_mi import create_mi_file
+from utils.rplot import run_r_script
+from covariation_similarity.covariation_similarity import compute_overlap
 
 
-def setup(input_directory, output_directory, run_ids):
-    if not os.path.exists(input_directory):
-        raise Exception('The input directory "{0}" does not exist.'.format(input_directory))
-    benchmarks_file = os.path.join(input_directory, 'benchmarks.json')
-    if not os.path.exists(benchmarks_file):
-        raise Exception('The benchmark details file "{0}" does not exist. This needs to be created before proceeding with analysis.'.format(benchmarks_file))
-
-    if not os.path.exists(output_directory):
-        os.mkdir(output_directory)
-
-    try:
-        benchmark_runs = json.loads(read_file(benchmarks_file))
-    except:
-        raise Exception('The benchmark details file "{0}" does not have the correct format (JSON).'.format(benchmarks_file))
-    if run_ids:
-        missing_run_ids = set(run_ids).difference(benchmark_runs.keys())
-        if missing_run_ids:
-            raise Exception('The benchmark run(s) "%s" are not defined in the benchmark details file "%s".' % ('", "'.join(missing_run_ids), benchmarks_file))
-        run_ids = sorted(run_ids)
-    else:
-        run_ids = sorted(benchmark_runs.keys())
-
-    d = {}
-    for run_id in run_ids:
-        d[run_id] = benchmark_runs[run_id]
-    return d
+class Analyzer(object):
 
 
-def get_normalized_run_file(run_id, extension):
-    return re.sub("([^\w\d\-_~,;:\[\]\(\).])", "_", run_id) + extension
+    def __init__(self, input_jsons, benchmark_ids, output_directory, overwrite_files, expectn, analysis_file_prefix = ''):
+
+        # Set up the object
+        self.output_directory = os.path.abspath(output_directory)
+        self.overwrite_files = overwrite_files
+        self.expectn = expectn
+        self.domain_sequences = None
+        self.analysis_file_prefix = analysis_file_prefix
+
+        # Set up which benchmarks we will be analyzing
+        self.get_domain_sequences(read_file('domain_sequences.txt'))
+        self.benchmark_details = Analyzer.load_benchmark_json_files(input_jsons, benchmark_ids)
+        self.summary_stats = {}
+        for k in self.benchmark_details.keys():
+            self.summary_stats[k] = {}
+        if not input_jsons:
+            raise Exception('No JSON files were supplied to the analysis object.')
+        if not self.benchmark_details:
+            if benchmark_ids:
+                raise Exception('The benchmark ids were not found in the JSON files.')
+            else:
+                raise Exception('No benchmark ids were found in the JSON files.')
 
 
-def create_fasta_file(run_id, input_directory, file_filter, overwrite_files, expectn):
-    print('Folder: {0}'.format(os.path.split(input_directory)[1]))
-    normalized_run_id = get_normalized_run_file(run_id, '.fasta')
-    output_fasta_filepath = os.path.join(input_directory, normalized_run_id)
-    if os.path.exists(output_fasta_filepath) and not overwrite_files:
-        if expectn:
-            num_fasta_headers = len([1 for l in get_file_lines(output_fasta_filepath) if l.startswith('>')])
-            if expectn != num_fasta_headers:
-                raise colortext.Exception('Expected {0} records in {1} but read {2}.'.format(expectn, output_fasta_filepath, num_fasta_headers))
-        print('FASTA file exists. Skipping generation.' + input_directory)
-        return output_fasta_filepath
+    @staticmethod
+    def load_benchmark_json_files(input_jsons, benchmark_ids):
+        d = {}
+        benchmark_ids = sorted(set(benchmark_ids))
+        for input_json in input_jsons:
+            root_path = os.path.abspath(os.path.split(input_json)[0])
+            if not os.path.exists(input_json):
+                raise Exception('Could not find JSON file "{0}".'.format(input_json))
+            try:
+                j = json.loads(read_file(input_json))
+            except:
+                raise Exception('{0} is not a valid JSON file.'.format(input_json))
+            try:
+                if benchmark_ids:
+                    b = {}
+                    for id in benchmark_ids:
+                        id = id.split('@')
+                        if len(id) == 1:
+                            benchmark_name = id[0]
+                            if j.get(benchmark_name):
+                                for method, details in j[benchmark_name].iteritems():
+                                    benchmark_key = '{0}@{1}'.format(benchmark_name, method)
+                                    if d.get(benchmark_key):
+                                        raise Exception('Ambiguity: Multiple records exists for {0} using {1}'.format(benchmark_name, method))
+                                    else:
+                                        d[benchmark_key] = copy.deepcopy(j[benchmark_name][method])
+                                        d[benchmark_key]['benchmark'] = benchmark_name
+                                        d[benchmark_key]['method_id'] = method
+                                        d[benchmark_key]['root_path'] = root_path
+                        elif len(id) == 2:
+                            benchmark_name = id[0]
+                            method = id[1]
+                            if j.get(benchmark_name, {}).get(method, {}):
+                                benchmark_key = '{0}@{1}'.format(benchmark_name, method)
+                                if d.get(benchmark_key):
+                                    raise Exception('Ambiguity: Multiple records exists for {0} using {1}'.format(benchmark_name, method))
+                                d[benchmark_key] = copy.deepcopy(j[benchmark_name][method])
+                                d[benchmark_key]['benchmark'] = benchmark_name
+                                d[benchmark_key]['method_id'] = method
+                                d[benchmark_key]['root_path'] = root_path
+                        else:
+                            raise Exception('The benchmark id {0} is invalid.')
+                else:
+                    for benchmark_name, methods in j.iteritems():
+                        for method, details in methods.iteritems():
+                            benchmark_key = '{0}@{1}'.format(benchmark_name, method)
+                            if d.get(benchmark_key):
+                                raise Exception('Ambiguity: Multiple records exists for {0} using {1}'.format(benchmark_name, method))
+                            else:
+                                d[benchmark_key] = copy.deepcopy(details)
+                                d[benchmark_key]['benchmark'] = benchmark_name
+                                d[benchmark_key]['root_path'] = root_path
+                                d[benchmark_key]['method_id'] = method
+            except Exception, e:
+                print(traceback.format_exc())
+                raise Exception('An exception occurred processing the JSON file: {0}'.format(str(e)))
+        for benchmark_id, benchmark_details in sorted(d.iteritems()):
+            assert('file_filter' in benchmark_details)
+            assert('method' in benchmark_details)
+        return d
 
-    fasta_records = []
-    c = 0
-    tc = 0
-    input_files = [os.path.abspath(os.path.join(input_directory, f)) for f in sorted(os.listdir(input_directory)) if re.match(file_filter, f)]
-    progress_step = (len(input_files)/(20.0))
-    if input_files:
-        print('[' + ('=' * 6) + 'Progress' + ('=' * 6) + ']')
-        sys.stdout.write(' ')
-        for pdb_file in input_files:
-            p = PDB.from_filepath(pdb_file)
-            p.pdb_id = os.path.split(pdb_file)[1]
-            if not (p.atom_sequences):
-                raise Exception('Could not extract any ATOM sequence from the PDB file.')
-            fasta_records.append(p.create_fasta(75).strip())
-            c += 1
-            tc += 1
-            if c >= progress_step:
-                c -= progress_step
-                sys.stdout.write('.'); sys.stdout.flush()
-        sys.stdout.write('\n'); sys.stdout.flush()
-    if fasta_records:
-        if expectn and (tc != expectn):
-            raise colortext.Exception('Expected {0} records in {1} but read {2}.'.format(expectn, input_directory, tc))
-        write_file(output_fasta_filepath, '\n'.join(fasta_records))
-        print('{0} FASTA records written.'.format(len(fasta_records)))
-        return output_fasta_filepath
-    else:
-        colortext.error('No FASTA files were created for directory "{0}".'.format(input_directory))
-        return False
+
+    @staticmethod
+    def get_normalized_run_file(benchmark_id, extension):
+        return re.sub("([^\w\d\-_~,;:\[\]\(\).])", "_", benchmark_id) + extension
 
 
+    # Setup scripts
 
-def analyze(input_directory, output_directory, run_ids, overwrite_files, expectn):
-    benchmark_runs = setup(input_directory, output_directory, run_ids)
 
-    domain_sequences = get_domain_sequences(read_file('domain_sequences.txt'))
-    print(domain_sequences)
-    for run_id, file_filter in sorted(benchmark_runs.iteritems()):
-        colortext.message('\n== Creating input files for benchmark "{0}" ==\n'.format(run_id))
-        colortext.message('Creating FASTA files'.format(run_id))
-        for f in sorted(os.listdir(input_directory)):
-            sub_dir = os.path.join(input_directory, f)
-            if os.path.isdir(sub_dir):
-                fasta_file = create_fasta_file(run_id, sub_dir, file_filter, overwrite_files, expectn)
-                if fasta_file:
-                    domain = os.path.split(sub_dir)[1].split('_')[0]
-                    indices_directory = os.path.abspath('indices')
-                    mutual_information_filepath = os.path.join(sub_dir, get_normalized_run_file(run_id, '.mi'))
-                    if overwrite_files or not(os.path.exists(mutual_information_filepath)):
-                        mi_file = create_mi_file(domain, read_file(fasta_file), domain_sequences, indices_directory, expectn = expectn)
-                        write_file(mutual_information_filepath, mi_file)
+    def get_domain_sequences(self, domain_sequences_file_content):
+        domain_sequences = {}
+        for line in domain_sequences_file_content.split('\n'):
+            line = line.strip()
+            if line:
+                domain_sequences[line.split()[0]] = line.split()[1]
+        self.domain_sequences = domain_sequences
+
+
+    def create_fasta_file(self, benchmark_id, input_directory, file_filter):
+        expectn = self.expectn
+        print('Folder: {0}'.format(os.path.split(input_directory)[1]))
+        normalized_run_id = Analyzer.get_normalized_run_file(benchmark_id, '.fasta')
+        output_fasta_filepath = os.path.join(input_directory, normalized_run_id)
+        if os.path.exists(output_fasta_filepath) and not self.overwrite_files:
+            if expectn:
+                num_fasta_headers = len([1 for l in get_file_lines(output_fasta_filepath) if l.startswith('>')])
+                if expectn != num_fasta_headers:
+                    raise colortext.Exception('Expected {0} records in {1} but read {2}.'.format(expectn, output_fasta_filepath, num_fasta_headers))
+            print('FASTA file exists. Skipping generation.' + input_directory)
+            return output_fasta_filepath
+
+        fasta_records = []
+        c = 0
+        tc = 0
+        input_files = [os.path.abspath(os.path.join(input_directory, f)) for f in sorted(os.listdir(input_directory)) if re.match(file_filter, f)]
+        progress_step = (len(input_files)/(20.0))
+        if input_files:
+            print('[' + ('=' * 6) + 'Progress' + ('=' * 6) + ']')
+            sys.stdout.write(' ')
+            for pdb_file in input_files:
+                p = PDB.from_filepath(pdb_file)
+                p.pdb_id = os.path.split(pdb_file)[1]
+                if not (p.atom_sequences):
+                    raise Exception('Could not extract any ATOM sequence from the PDB file.')
+                fasta_records.append(p.create_fasta(75).strip())
+                c += 1
+                tc += 1
+                if c >= progress_step:
+                    c -= progress_step
+                    sys.stdout.write('.'); sys.stdout.flush()
+            sys.stdout.write('\n'); sys.stdout.flush()
+        if fasta_records:
+            if expectn and (tc != expectn):
+                raise colortext.Exception('Expected {0} records in {1} but read {2}.'.format(expectn, input_directory, tc))
+            write_file(output_fasta_filepath, '\n'.join(fasta_records))
+            print('{0} FASTA records written.'.format(len(fasta_records)))
+            return output_fasta_filepath
+        else:
+            colortext.error('No FASTA files were created for directory "{0}".'.format(input_directory))
+            return False
+
+
+    # Metric functions
+
+    def compute_covariation_similarity(self, domain, mutual_information_filepath):
+        struct = self.domain_sequences[domain]
+        natural_covariation_file = os.path.join('natural_covariation', domain + '_80.mi')
+        indices_file = os.path.join('indices', struct + ".indices")
+        if not os.path.exists(natural_covariation_file):
+            raise Exception('Error: The file "{0}" does not exist.'.format(natural_covariation_file))
+        if not os.path.exists(indices_file):
+            raise Exception('Error: The file "{0}" does not exist.'.format(indices_file))
+        overlap = compute_overlap(natural_covariation_file, mutual_information_filepath, indices_file)
+        return overlap
+
+
+    # Main function
+
+
+    def run(self):
+        covariation_similarities = {}
+        for benchmark_id, benchmark_details in sorted(self.benchmark_details.iteritems()):
+            covariation_similarities[benchmark_id] = {}
+            input_directory = benchmark_details['root_path']
+            assert(os.path.exists(input_directory))
+            file_filter = benchmark_details['file_filter']
+            # Create the input files (.mi and .fasta)
+
+            colortext.message('\n== Creating input files for benchmark: {0} ==\n'.format(benchmark_id))
+            colortext.message('Creating FASTA files and mutual information files')
+            for f in sorted(os.listdir(input_directory)):
+                sub_dir = os.path.join(input_directory, f)
+                if os.path.isdir(sub_dir):
+                    fasta_file = self.create_fasta_file(benchmark_id, sub_dir, file_filter)
+                    if fasta_file:
+                        domain = os.path.split(sub_dir)[1].split('_')[0]
+                        indices_directory = os.path.abspath('indices')
+                        mutual_information_filepath = os.path.join(sub_dir, Analyzer.get_normalized_run_file(benchmark_id, '.mi'))
+                        if self.overwrite_files or not(os.path.exists(mutual_information_filepath)):
+                            mi_file = create_mi_file(domain, read_file(fasta_file), self.domain_sequences, indices_directory)
+                            write_file(mutual_information_filepath, mi_file)
+                        covariation_similarities[benchmark_id][domain] = self.compute_covariation_similarity(domain, mutual_information_filepath)
                     else:
                         print('Mutual information (.mi) file exists. Skipping generation.' + input_directory)
-                print('')
+                    print('')
+
+        common_domains = set(covariation_similarities[covariation_similarities.keys()[0]].keys())
+        for benchmark_id, covariation_similarity_values in covariation_similarities.iteritems():
+            common_domains = common_domains.intersection(set(covariation_similarity_values.keys()))
+        if not common_domains:
+            raise Exception('There were no domains common to the specified benchmark runs.')
+        common_domains = sorted(common_domains)
+
+        self.analyze_covariation_similarity(covariation_similarities, common_domains)
+
+        pprint.pprint(self.summary_stats)
 
 
+    def analyze_covariation_similarity(self, covariation_similarities, common_domains):
+        '''This function creates a text file with the covariation similarities by benchmark and domain and runs R to
+           generate boxplots of the covariation similarities.'''
+        data_frame_values = []
+        for benchmark_id, domain_values in sorted(covariation_similarities.iteritems()):
+            for domain, covariation_similarity in sorted(domain_values.iteritems()):
+                benchmark_details = self.benchmark_details[benchmark_id]
+                method = benchmark_details['method']
+                if benchmark_details.get('kT') != None:
+                    method += ', kT {0}'.format(benchmark_details.get('kT'))
+                data_frame_values.append((benchmark_details['benchmark'], method, domain, covariation_similarity))
+
+        benchmark_column = "','".join(d[0] for d in data_frame_values)
+        method_column = "','".join(d[1] for d in data_frame_values)
+        domain_column = "','".join(d[2] for d in data_frame_values)
+        covariation_similarity_column = ",".join(str(d[3]) for d in data_frame_values)
+
+        covariation_graph_commands = '''
+p <- ggplot(data = benchmark_data, aes(factor(method), covariation_similarity, fill=method))
+p <- p + stat_boxplot(geom ='errorbar', linetype="solid", width = 0.25, position = "dodge")
+p <- p + stat_boxplot(geom = "boxplot", linetype="solid", position = "dodge", width = 0.60, na.rm = TRUE) + xlab("Method") + ylab("Covariation similarity") + facet_grid(.~benchmark) + theme(legend.position="none")
+p
+'''
+
+        covariation_similarity_r_script = '''
+library(ggplot2)
+library(grid)
+
+benchmark_data <- data.frame(benchmark=c('{0}'),
+                             method=c('{1}'),
+                             domain=c('{2}'),
+                             covariation_similarity=c({3}))
+
+pdf('{4}covariation_similarity.pdf')
+{5}
+dev.off()
+
+png('{4}covariation_similarity.png')
+{5}
+dev.off()
+'''.format(benchmark_column, method_column, domain_column, covariation_similarity_column, self.analysis_file_prefix, covariation_graph_commands, self.analysis_file_prefix, covariation_graph_commands)
+
+        r_script_filepath = os.path.join(self.output_directory, '{0}covariation_similarity.R'.format(self.analysis_file_prefix))
+        write_file(r_script_filepath, covariation_similarity_r_script)
+        run_r_script(r_script_filepath, cwd = self.output_directory)
+
+        covariation_xy_file_lines = []
+        benchmark_ids = sorted(covariation_similarities.keys())
+        covariation_xy_file_lines.append('\t'.join(['Domain'] + benchmark_ids))
+        for domain in common_domains:
+            columns = [domain]
+            for benchmark_id in benchmark_ids:
+                columns.append(covariation_similarities[benchmark_id][domain])
+            covariation_xy_file_lines.append('\t'.join(map(str, columns)))
+        write_file(os.path.join(self.output_directory, '{0}covariation_similarity_xy.txt'.format(self.analysis_file_prefix)), '\n'.join(covariation_xy_file_lines))
+
+        for benchmark_id, covariation_similarity_values in sorted(covariation_similarities.iteritems()):
+            self.summary_stats[benchmark_id]['Covariation similarity'] = numpy.mean(covariation_similarity_values.values())
 
 
 
@@ -184,9 +360,8 @@ if __name__ == '__main__':
 
     try:
         arguments = docopt.docopt(__doc__.format(**locals()))
-        input_directory = arguments['<input_directory>']
-        output_directory = arguments['<output_directory>']
-        run_ids = None
+        input_jsons = sorted(set(arguments['JSON_FILES']))
+        output_directory = arguments['--out']
         overwrite_files = arguments['--overwrite']
         expectn = arguments['--expectn'] or None
         if expectn:
@@ -195,8 +370,10 @@ if __name__ == '__main__':
                 expectn = int(expectn)
             except:
                 raise Exception('The --expectn argument should be an integer.')
-        if arguments['--run']:
-            run_ids = [arguments['--run']]
-        analyze(input_directory, output_directory, run_ids, overwrite_files, expectn)
+        benchmark_ids = []
+        if arguments['--benchmark']:
+            benchmark_ids = arguments['--benchmark']
+        analysis_file_prefix = arguments['--prefix'] or ''
+        Analyzer(input_jsons, benchmark_ids, output_directory, overwrite_files, expectn, analysis_file_prefix).run()
     except KeyboardInterrupt:
         print

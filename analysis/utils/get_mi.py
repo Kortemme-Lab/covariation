@@ -126,15 +126,6 @@ def get_MI(length, entropies, joint_entropies):
     return MI, Z, Zp, Zpx
 
 
-def get_domain_sequences(domain_sequences_file_content):
-    structs = {}
-    for line in domain_sequences_file_content.split('\n'):
-        line = line.strip()
-        if line:
-            structs[line.split()[0]] = line.split()[1]
-    return structs
-
-
 def create_mi_file(domain, fasta_file_contents, domain_sequences, indices_directory, expectn = None):
 
     structure = domain_sequences[domain]
