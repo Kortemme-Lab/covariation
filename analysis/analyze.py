@@ -262,6 +262,7 @@ class Analyzer(object):
 
     # Metric functions
 
+
     def compute_covariation_similarity(self, domain, mutual_information_filepath):
         '''Computes the covariation similarity for a domain based on the mutual information file.'''
         struct = self.domain_sequences[domain]
@@ -412,10 +413,6 @@ class Analyzer(object):
         return float(sum) / float(len(predicted_sequences))
 
 
-
-
-
-
     # Main function
 
 
@@ -499,6 +496,7 @@ class Analyzer(object):
                 print('  {0} : {1}'.format(metric.ljust(metric_name_length), value_str))
         print('')
 
+
     def analyze_covariation_similarity(self, covariation_similarities, common_domains):
         '''This function creates a text file with the covariation similarities by benchmark and domain and runs R to
            generate boxplots of the covariation similarities.'''
@@ -566,8 +564,6 @@ png('%(analysis_file_prefix)s%(metric_column_name)s.png')
 dev.off()
 ''' % locals()
 
-
-
         r_script_filepath = os.path.join(self.output_directory, '{0}{1}.R'.format(self.analysis_file_prefix, metric_column_name))
         write_file(r_script_filepath, boxplot_r_script)
 
@@ -588,7 +584,6 @@ dev.off()
         # Compute the mean of the values per benchmark
         for benchmark_id, metric_values in sorted(metric_data.iteritems()):
             self.summary_stats[benchmark_id][metric_column_title] = numpy.mean(metric_values.values())
-
 
 
 if __name__ == '__main__':
