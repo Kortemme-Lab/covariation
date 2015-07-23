@@ -36,7 +36,7 @@ expressions used to identify the output files. An example benchmarks.json can be
 
 
 Usage:
-    analyze.py [options] (-o OUTPUT_DIRECTORY) [--benchmark=BENCHMARK ...] (JSON_FILES ...)
+    analyze.py [options] (-o OUTPUT_DIRECTORY) [--benchmark=BENCHMARK ...] [--include_published_data=METHOD ...]  (JSON_FILES ...)
 
 Options:
 
@@ -58,6 +58,16 @@ Options:
     --expectn EXPECTED_CASES
         If a certain number of sequences is expected e.g. if 500 sequences were expected to be created then this flag
         can be used to ensure that no sequences are missing.
+
+    --include_published_data METHOD
+        Include the published data for the specified method. Valid values are 'All', 'Fixed', '0.3', '0.6', '0.9', '1.2', '1.8', '2.4'.
+
+    --published_data_backrub_method_prefix PREFIX
+        If published data is included, add this string as a prefix to identify the backrub methods. This is useful if the methods are
+        named differently in your benchmark scripts.
+
+    --published_data_backrub_method_suffix SUFFIX
+        See the published_data_backrub_method_prefix option above.
 
 Authors:
     Noah Ollikainen: Analysis scripts
@@ -88,12 +98,14 @@ from utils.get_mi import create_mi_file
 from utils.rplot import run_r_script
 from covariation_similarity.covariation_similarity import compute_overlap
 from profile_similarity.profile_similarity import get_covarying_pairs, get_rosetta_sequence, get_natural_sequences, background
-
+from published_data.published_data import get_data_frame
+from published_data.published_data import get_method_ids as get_published_method_ids
+from published_data.published_data import published_methods as published_backrub_methods
 
 class Analyzer(object):
 
 
-    def __init__(self, input_jsons, benchmark_ids, output_directory, overwrite_files, expectn, analysis_file_prefix = ''):
+    def __init__(self, input_jsons, benchmark_ids, output_directory, overwrite_files, expectn, published_data_methods = [], backrub_method_prefix = '', backrub_method_suffix = '', analysis_file_prefix = ''):
 
         # Set up the object
         self.output_directory = os.path.abspath(output_directory)
@@ -102,6 +114,9 @@ class Analyzer(object):
         self.domain_sequences = None
         self.native_sequences = None
         self.analysis_file_prefix = analysis_file_prefix
+        self.published_data_methods = published_data_methods
+        self.backrub_method_prefix = backrub_method_prefix
+        self.backrub_method_suffix = backrub_method_suffix
 
         if not os.path.exists(self.output_directory):
             try:
@@ -479,7 +494,6 @@ class Analyzer(object):
                     min_max[metric] = (value, value)
                 else:
                     min_max[metric] = (min(min_max[metric][0], value), max(min_max[metric][1], value))
-        pprint.pprint(min_max)
 
         # Print the summary (mean) value for each metric for all of the benchmarks
         # We color-code the values to highlight the best (green) and worst (red) values
@@ -489,10 +503,11 @@ class Analyzer(object):
             metric_name_length = max(map(len, v.keys()))
             for metric, value in sorted(v.iteritems()):
                 value_str = str(value)
-                if min_max[metric][0] == value:
-                    value_str = colortext.mred(value_str)
-                elif min_max[metric][1] == value:
-                    value_str = colortext.mgreen(value_str)
+                if len(self.summary_stats) != 1:
+                    if min_max[metric][0] == value:
+                        value_str = colortext.mred(value_str)
+                    elif min_max[metric][1] == value:
+                        value_str = colortext.mgreen(value_str)
                 print('  {0} : {1}'.format(metric.ljust(metric_name_length), value_str))
         print('')
 
@@ -525,13 +540,22 @@ class Analyzer(object):
 
         # Create the R data frame
         data_frame_values = []
+        benchmark_ids = set()
+        method_ids = set()
         for benchmark_id, domain_values in sorted(metric_data.iteritems()):
+            benchmark_ids.add(benchmark_id)
             for domain, metric_value in sorted(domain_values.iteritems()):
                 benchmark_details = self.benchmark_details[benchmark_id]
-                method = benchmark_details['method']
-                if benchmark_details.get('kT') != None:
-                    method += ', kT {0}'.format(benchmark_details.get('kT'))
+                if benchmark_details.get('title'):
+                    # If the user specifies a title, that should be used
+                    method = benchmark_details['title']
+                else:
+                    method = benchmark_details['method']
+                    if benchmark_details.get('kT') != None:
+                        method += ', kT {0}'.format(benchmark_details.get('kT'))
+                method_ids.add(method)
                 data_frame_values.append((benchmark_details['benchmark'], method, domain, metric_value))
+
         benchmark_column = "','".join(d[0] for d in data_frame_values)
         method_column = "','".join(d[1] for d in data_frame_values)
         domain_column = "','".join(d[2] for d in data_frame_values)
@@ -550,16 +574,37 @@ p
 library(ggplot2)
 library(grid)
 
+'''
+        published_data_dataframe = None
+        if self.published_data_methods and metric_column_name != 'sequence_entropy':
+            print(metric_column_name)
+            published_data_dataframe = get_data_frame(self.published_data_methods, metric_column_name, backrub_method_prefix = self.backrub_method_prefix, backrub_method_suffix = self.backrub_method_suffix)
+            if published_data_dataframe:
+                boxplot_r_script += published_data_dataframe
+            print(11,method_ids)
+            method_ids = method_ids.union(set(get_published_method_ids(self.published_data_methods, backrub_method_prefix = self.backrub_method_prefix, backrub_method_suffix = self.backrub_method_suffix)))
+            print(13,method_ids)
+            benchmark_ids.add('_plos_one_published_data')
+
+
+        boxplot_r_script += '''
 benchmark_data <- data.frame(benchmark=c('%(benchmark_column)s'),
                              method=c('%(method_column)s'),
                              domain=c('%(domain_column)s'),
                              %(metric_column_name)s=c(%(metric_data_column)s))
+''' % locals()
+        if published_data_dataframe:
+            boxplot_r_script += '''benchmark_data <- rbind(plos_benchmark_data, benchmark_data)\n'''
 
+        # Create a PNG file with roughly 150 pixels per method boxplot
+        png_width = 150 * (len(method_ids) * len(benchmark_ids))
+
+        boxplot_r_script += '''
 pdf('%(analysis_file_prefix)s%(metric_column_name)s.pdf')
 %(boxplot_generation_commands)s
 dev.off()
 
-png('%(analysis_file_prefix)s%(metric_column_name)s.png')
+png('%(analysis_file_prefix)s%(metric_column_name)s.png',width=%(png_width)d)
 %(boxplot_generation_commands)s
 dev.off()
 ''' % locals()
@@ -583,7 +628,7 @@ dev.off()
 
         # Compute the mean of the values per benchmark
         for benchmark_id, metric_values in sorted(metric_data.iteritems()):
-            self.summary_stats[benchmark_id][metric_column_title] = numpy.mean(metric_values.values())
+            self.summary_stats[benchmark_id][metric_column_title] = numpy.median(metric_values.values())
 
 
 if __name__ == '__main__':
@@ -604,6 +649,14 @@ if __name__ == '__main__':
         if arguments['--benchmark']:
             benchmark_ids = arguments['--benchmark']
         analysis_file_prefix = arguments['--prefix'] or ''
-        Analyzer(input_jsons, benchmark_ids, output_directory, overwrite_files, expectn, analysis_file_prefix).run()
+
+        if 'all' in [s.lower() for s in arguments['--include_published_data']]:
+            arguments['--include_published_data'] = published_backrub_methods
+
+        Analyzer(input_jsons, benchmark_ids, output_directory, overwrite_files, expectn,
+                 analysis_file_prefix = analysis_file_prefix,
+                 published_data_methods = arguments['--include_published_data'],
+                 backrub_method_prefix = arguments.get('--published_data_backrub_method_prefix') or '',
+                 backrub_method_suffix = arguments.get('--published_data_backrub_method_suffix') or '').run()
     except KeyboardInterrupt:
         print
