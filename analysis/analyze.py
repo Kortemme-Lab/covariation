@@ -577,13 +577,10 @@ library(grid)
 '''
         published_data_dataframe = None
         if self.published_data_methods and metric_column_name != 'sequence_entropy':
-            print(metric_column_name)
             published_data_dataframe = get_data_frame(self.published_data_methods, metric_column_name, backrub_method_prefix = self.backrub_method_prefix, backrub_method_suffix = self.backrub_method_suffix)
             if published_data_dataframe:
                 boxplot_r_script += published_data_dataframe
-            print(11,method_ids)
             method_ids = method_ids.union(set(get_published_method_ids(self.published_data_methods, backrub_method_prefix = self.backrub_method_prefix, backrub_method_suffix = self.backrub_method_suffix)))
-            print(13,method_ids)
             benchmark_ids.add('_plos_one_published_data')
 
 
