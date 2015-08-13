@@ -325,9 +325,11 @@ if __name__ == '__main__':
     else:
         benchmark_run_script = os.path.join(output_directory, 'run_benchmark.sh')
         write_file(benchmark_run_script, run_script)
+        os.chmod(benchmark_run_script, 0755)  
         if run_jobs_on_cluster:
+            print('\nSubmitting jobs:')
             subprocess.call(benchmark_run_script)
-            print('\nJobs for {0} domains have been submitted.\n'.format(len(input_pdbs)))
+            print('Jobs for {0} domains have been submitted.\n'.format(len(input_pdbs)))
         else:
             print('\nJobs for {0} domains have been set up:\nExecute {1} to run the benchmark.\n'.format(len(input_pdbs), benchmark_run_script))
 
