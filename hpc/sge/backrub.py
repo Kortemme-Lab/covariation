@@ -25,11 +25,7 @@ sge_task_id = long(os.environ["SGE_TASK_ID"])
 print "Task:", sge_task_id
 
 rosetta_env = os.environ.copy()
-mysql_lib = '/netapp/home/kbarlow/lib/mysql-connector-c-6.1.2-linux-glibc2.5-x86_64/lib:'
-try:
-    rosetta_env['LD_LIBRARY_PATH'] = mysql_lib + ':' + rosetta_env['LD_LIBRARY_PATH']
-except KeyError:
-    rosetta_env['LD_LIBRARY_PATH'] = mysql_lib
+%(ld_path_extension)s
 
 args = shlex.split('/netapp/home/shaneoconner/compilation/r57934/main/source/bin/backrub.linuxgccrelease -database /netapp/home/shaneoconner/compilation/r57934/main/database -s %(input_pdb)s.pdb -resfile /netapp/home/shaneoconner/t14benchmarking/covariation/input/NATAA.res -ex1 -ex2 -extrachi_cutoff 0 -backrub:mc_kt %(temperature)s -backrub:ntrials ' + str(ntrials) + ' -nstruct 1 -out::suffix _%(temperature)s_' + str(sge_task_id) + ' -backrub:initial_pack')
 
