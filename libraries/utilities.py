@@ -22,6 +22,27 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import sys
+import gzip
+
+
+def die(msg, errorcode = None):
+    print('\n{0}\n'.format(msg))
+    sys.exit(errorcode or 1)
+
+
+def read_file(filepath, binary = False):
+    if binary:
+        output_handle = open(filepath, 'rb')
+    elif filepath.endswith('.gz'):
+        output_handle = gzip.open(filepath, 'r')
+    else:
+        output_handle = open(filepath, 'r')
+    contents = output_handle.read()
+    output_handle.close()
+    return contents
+
+
 def write_file(filepath, contents, ftype = 'w'):
     output_handle = open(filepath, ftype)
     output_handle.write(contents)
