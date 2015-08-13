@@ -2,7 +2,7 @@
 
 # The MIT License (MIT)
 #
-# Copyright (c) 2015 Kale Kundert
+# Copyright (c) 2015 Shane O'Connor
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -96,6 +96,14 @@ Options:
     --mysql_lib PATH_TO_MYSQL_LIBRARY
         If Rosetta is built by linking against MySQL libraries, these may need to be added to the LD library path. This
         option allows you to specify the location of the libraries.
+
+    --setup_only
+        If this option is selected, the jobs are not submitted to the cluster. The files and execution script are created
+        so that the job may be run later.
+
+    --settings SETTINGS_FILE
+        By default, protocols/rosetta/settings.json is used the load the benchmark settings (paths to Rosetta etc.). This
+        location can be overridden with this option.
 """
 
 import sys
@@ -197,10 +205,17 @@ if __name__ == '__main__':
     method_details = methods[method]
 
     # Read the configuration file
-    settings_filepath = os.path.join(benchmark_root, 'protocols', 'rosetta', 'settings.json')
+    default_settings_filepath = os.path.join(benchmark_root, 'protocols', 'rosetta', 'settings.json')
+    if arguments['--settings']:
+        settings_filepath = os.path.abspath(os.path.normpath(arguments['--settings']))
+    else:
+        settings_filepath = default_settings_filepath
     if not os.path.exists(settings_filepath):
-        die('The settings file {0} has not been configured. See {0}.example for an example configuration.'.format(settings_filepath))
-    settings = json.loads(read_file(settings_filepath))
+        die('The settings file {0} has not been created. See {0}.example for an example configuration.'.format(settings_filepath))
+    try:
+        settings = json.loads(read_file(settings_filepath))
+    except:
+        die('The settings file {0} is not a valid JSON file. See {1}.example for an example configuration.'.format(settings_filepath, default_settings_filepath))
 
     # Check to see whether this is being run from an SGE submission host or a workstation
     run_jobs_on_cluster = False
@@ -208,7 +223,7 @@ if __name__ == '__main__':
     p = subprocess.Popen(['qstat'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = p.communicate()
     if p.returncode == 0:
-        run_jobs_on_cluster = arguments['--setup-only']
+        run_jobs_on_cluster = arguments['--setup_only']
         rosetta_path = settings['cluster_rosetta_installation_path']
     else:
         rosetta_path = settings['local_rosetta_installation_path']
@@ -284,6 +299,7 @@ if __name__ == '__main__':
     input_pdbs = []
     input_directory = os.path.join(benchmark_root, 'input', 'domains')
     benchmark_parameters['extra_flags'] = ' '.join([s.strip() for s in benchmark_parameters['extra_flags']])
+    run_script = '#!/bin/bash\n'
     for domain in os.listdir(input_directory):
         if (restricted_to_domains and (domain in restricted_to_domains)) or not(restricted_to_domains):
             for pdb in glob.glob(os.path.join(input_directory, domain, '*.pdb')):
@@ -301,16 +317,19 @@ if __name__ == '__main__':
                 shutil.copyfile(pdb, os.path.join(job_directory, pdb_name + '.pdb'))
                 job_script_path = os.path.join(job_directory, '{0}.py'.format(method))
                 script = create_script(job_script_path, job_parameters)
-                if run_jobs_on_cluster:
-                    subprocess.call(shlex.split('qsub ' + job_script_path))
+                run_script += ('qsub {0}\n'.format(job_script_path))
+    run_script += '\n'
 
     if len(input_pdbs) == 0:
         die('No input PDB files were found.')
-
-    if run_jobs_on_cluster:
-        print('\nJobs for {0} domains have been submitted.\n'.format(len(input_pdbs)))
     else:
-        print('\nJobs for {0} domains have been set up.\n'.format(len(input_pdbs)))
+        benchmark_run_script = os.path.join(output_directory, 'run_benchmark.sh')
+        write_file(benchmark_run_script, run_script)
+        if run_jobs_on_cluster:
+            subprocess.call(benchmark_run_script)
+            print('\nJobs for {0} domains have been submitted.\n'.format(len(input_pdbs)))
+        else:
+            print('\nJobs for {0} domains have been set up:\nExecute {1} to run the benchmark.\n'.format(len(input_pdbs), benchmark_run_script))
 
 
 
