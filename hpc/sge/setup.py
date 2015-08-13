@@ -223,7 +223,7 @@ if __name__ == '__main__':
     p = subprocess.Popen(['qstat'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = p.communicate()
     if p.returncode == 0:
-        run_jobs_on_cluster = arguments['--setup_only']
+        run_jobs_on_cluster = not(arguments['--setup_only'])
         rosetta_path = settings['cluster_rosetta_installation_path']
     else:
         rosetta_path = settings['local_rosetta_installation_path']
