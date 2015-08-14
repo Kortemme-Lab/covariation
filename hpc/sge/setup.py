@@ -125,7 +125,9 @@ script_preamble = '''#!/usr/bin/env python2
 #$ -cwd
 #$ -r y
 #$ -j y
-#$ -l h_rt=24:00:00
+#$ -o %(job_directory)s
+#$ -e %(job_directory)s
+#$ -l h_rt=%(expected_time)s
 #$ -t 1-%(nstruct)s
 #$ -l mem_free=2G
 #$ -l arch=linux-x64
@@ -137,10 +139,40 @@ import datetime
 import shlex
 import subprocess
 
+
+def Popen_shell(cmd, outdir = os.getcwd()):
+    subp = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=outdir)
+    output = subp.communicate()
+    return output[0], output[1], subp.returncode
+
+class bufferless_output(object):
+    
+    def __init__(self, output):
+        self.output = output
+
+    def write(self, str):
+        self.output.write(str)
+        self.output.flush()
+        if not self.output.isatty():
+            os.fsync(self.output.fileno()) # force write
+    
+    def __getattr__(self, attr):
+        return getattr(self.output, attr)
+    
+
+sge_task_id, job_id = 1, 1
+try: sge_task_id = long(os.environ["SGE_TASK_ID"])
+except: pass
+try: job_id = long(os.environ["JOB_ID"])
+except: pass
+
+t1 = datetime.datetime.now()
+sys.stdout = bufferless_output(sys.stdout)
+sys.stderr = bufferless_output(sys.stderr)
+
 print "Python version:", sys.version
 print "Hostname:", socket.gethostname()
-print "Time:", datetime.datetime.now()
-sge_task_id = long(os.environ["SGE_TASK_ID"])
+print "Time:", t1
 print "Task:", sge_task_id
 
 rosetta_env = os.environ.copy()
@@ -159,20 +191,30 @@ except KeyError:
 
 simple_step_commands = '''
 # %(step)s step
+print "Starting %(step)s step"
 args = shlex.split(%(command_line)s)
-rosetta_process = subprocess.Popen(args, stdout=subprocess.PIPE, cwd="%(job_directory)s", env=rosetta_env)
+rosetta_process = subprocess.Popen(args, cwd="%(job_directory)s", env=rosetta_env)
 out, err = rosetta_process.communicate()
 sys.stdout.write(out or '')
 sys.stdout.flush()
 if err:
     sys.stderr.write(err)
 return_code = rosetta_process.returncode
-print "%(method)s return code", return_code
+print "%(step)s return code", return_code
 print ""
 '''
 
 script_epilog = '''
-print "Time:", datetime.datetime.now()
+t2 = datetime.datetime.now()
+print "Time:", t2
+try:
+    time_diff = t2 -t1
+    tminutes, tseconds = divmod(time_diff.days * 86400 + time_diff.seconds, 60)
+    print('Time taken: {0}m {1}s'.format(tminutes, tseconds))
+    mem_usage, stderr, returncode = Popen_shell('qstat -j ' + str(job_id) + ' | grep -E "usage +' + str(sge_task_id) + '" | sed "s/.*maxvmem=//"')
+    print 'Memory usage:', mem_usage
+except: pass
+
 '''
 
 
@@ -258,6 +300,7 @@ if __name__ == '__main__':
         extra_flags = [],
         ld_path_extension = ld_path_extension,
         method = method,
+        expected_time = "24:00:00",
     )
     if arguments['--talaris2014']:
         benchmark_parameters['extra_flags'].append('-talaris2014 true')
@@ -267,6 +310,7 @@ if __name__ == '__main__':
         restricted_to_domains = ['PF00013', 'PF00018']
         benchmark_parameters['nstruct'] = 5
         benchmark_parameters['ntrials'] = 100
+        benchmark_parameters['expected_time'] = "00:29:00"
 
     # Add the flags file parameter
     if arguments['--flags']:
