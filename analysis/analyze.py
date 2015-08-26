@@ -94,13 +94,15 @@ from libraries import docopt
 from libraries import colortext
 from utils.fsio import read_file, write_file, get_file_lines
 from utils.pdb import PDB
-from utils.get_mi import create_mi_file
+from utils.get_mi import create_mi_file, calculate_entropy
 from utils.rplot import run_r_script
 from covariation_similarity.covariation_similarity import compute_overlap
 from profile_similarity.profile_similarity import get_covarying_pairs, get_rosetta_sequence, get_natural_sequences, background
 from published_data.published_data import get_data_frame
 from published_data.published_data import get_method_ids as get_published_method_ids
 from published_data.published_data import published_methods as published_backrub_methods
+
+canonical_aas = set(['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y'])
 
 class Analyzer(object):
 
@@ -127,6 +129,10 @@ class Analyzer(object):
 
         # Read in the domain and native sequence data
         self.get_domain_sequences(read_file('domain_sequences.txt'))
+        print(self.domain_sequences)
+        self.determine_positions_for_entropy_calculation()
+        sys.exit(0)
+        #PF00013 1WVN_A THELTIPNNLIGCIIGRQGANINEIRQMSGAQIKI-----ANP-------VEGSSGRQVTITG-SAASISLAQYLI
         self.get_native_sequences(os.path.join('sequence_recovery', 'native_sequences'))
 
         # Set up which benchmarks we will be analyzing
@@ -211,6 +217,72 @@ class Analyzer(object):
 
 
     # Setup scripts
+
+    def determine_positions_for_entropy_calculation(self):
+        '''Computes the profile similarity for a domain based on the mutual information and FASTA file.'''
+        domain_sequences = self.domain_sequences
+        total_num_conserved_positions = 0
+        total_num_varying_positions = 0
+
+        for f in sorted(glob.glob(os.path.join('natural_alignments', '*.align.80'))):
+            sequences = []
+            num_conserved_positions = 0
+            num_varying_positions = 0
+            lines = [l.strip() for l in get_file_lines(f) if l.strip() and not(l.startswith('>'))]
+            domain_id = os.path.split(f[:f.find('.align.80')])[1]
+            if domain_id != 'PF00013':
+                continue
+            pdb_chain_id = domain_sequences[domain_id]
+            indices_file = os.path.join('indices', '%s.indices' % pdb_chain_id)
+            assert(os.path.exists(indices_file))
+            indices_lines = [l.strip() for l in get_file_lines(indices_file) if l.strip()]
+            expected_length = int(indices_lines[-1].split()[0]) + 1
+            conserved_positions = [True] * expected_length
+
+            positions = range(expected_length)
+            for l in lines:
+                assert(len(l) == expected_length)
+                for x in positions:
+                    if l[x] == '-' or l[x] not in canonical_aas:
+                        if l[x] != '-':
+                            print(l[x])
+                        conserved_positions[x] = False
+                    else:
+                        if not('A' <= l[x] <= 'Y'):
+                            print(domain_id, pdb_chain_id, len(indices_lines), int(indices_lines[-1].split()[0]) + 1)
+                            print(l[x])
+
+            for l in lines:
+                sequence = ''
+                for x in positions:
+                    if conserved_positions[x]:
+                        sequence += l[x]
+                sequences.append(sequence)
+
+            for x in conserved_positions:
+                if x:
+                    num_conserved_positions += 1
+                else:
+                    num_varying_positions += 1
+            total_num_conserved_positions += num_conserved_positions
+            total_num_varying_positions += num_varying_positions
+            print(domain_id, pdb_chain_id, len(indices_lines), int(indices_lines[-1].split()[0]) + 1, total_num_conserved_positions, total_num_varying_positions)
+            entropies = calculate_entropy(sequences)
+            print(entropies)
+            sys.exit(0)
+            #break
+
+        print(total_num_conserved_positions, total_num_conserved_positions_2)
+        print(total_num_varying_positions)
+
+
+
+
+
+
+            #
+            #print(lines)
+
 
 
     def get_domain_sequences(self, domain_sequences_file_content):

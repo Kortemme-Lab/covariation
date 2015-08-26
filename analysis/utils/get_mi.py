@@ -27,6 +27,41 @@ import operator
 import numpy
 from fsio import read_file
 
+def calculate_entropy(sequences, expectn = None):
+
+
+    length = set([len(s) for s in sequences])
+    assert(len(length) == 1)
+    length = length.pop()
+
+#use numpy here
+
+    aa = 'ACDEFGHIKLMNPQRSTVWY'
+    count_matrix = numpy.zeros((length, 20))
+
+    num_sequences = float(len(sequences))
+    if expectn and len(sequences) != expectn:
+        raise Exception('Expected {0} records in but read {2}.'.format(expectn, len(sequences)))
+
+    entropies = {}
+    counts = {}
+    frequencies = {}
+
+    for i in range(0, length):
+        counts[i] = dict.fromkeys(aa, 0)
+        for seq in sequences:
+            counts[i][seq[i]] += 1
+        frequencies[i] = dict.fromkeys(aa, 0)
+        xsum = 0
+        for char in frequencies[i]:
+            freq = float(counts[i][char]) / num_sequences
+            frequencies[i][char] = freq
+            if freq > 0:
+                xsum += -1 * freq * math.log(freq,20)
+        entropies[i] = xsum
+    return entropies
+
+
 def get_MI(length, entropies, joint_entropies):
 
     MI = {}
