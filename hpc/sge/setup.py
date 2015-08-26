@@ -30,6 +30,8 @@ methods = dict(
             fixbb_step   = '"%(fixbb_executable)s -database %(rosetta_database_path)s -s %(input_pdb)s_%(temperature)s_" + str(sge_task_id) + "_0001_last.pdb -resfile %(ALLAA_resfile)s -ex1 -ex2 -extrachi_cutoff 0 -nstruct 1 -overwrite -linmem_ig 10 -no_his_his_pairE -minimize_sidechains %(extra_flags)s"'
         ),
         dependent_binaries = ['backrub', 'fixbb'],
+        uses_temperature = True,
+        file_filter = "([0-9A-Za-z]{4})_([0-9A-Za-z]{1})_%(temperature)s_\\d+_0001_last_0001.pdb",
     ),
     fixbb = dict(
         method_type = 'Fixed backbone',
@@ -37,6 +39,9 @@ methods = dict(
             fixbb_step   = '"%(fixbb_executable)s -database %(rosetta_database_path)s -s %(input_pdb)s.pdb -resfile %(ALLAA_resfile)s -ex1 -ex2 -extrachi_cutoff 0 -nstruct 1 -overwrite -linmem_ig 10 -no_his_his_pairE -minimize_sidechains -out::suffix _" + str(sge_task_id) + " %(extra_flags)s"',
         ),
         dependent_binaries = ['fixbb'],
+        default_title = 'Fixed',
+        uses_temperature = False,
+        file_filter = "([0-9A-Za-z]{4})_([0-9A-Za-z]{1})_\\d+_0001.pdb",
     ),
 )
 
@@ -46,14 +51,19 @@ This script can be used to setup, and optionally run, the covariation benchmark.
 allow you to specify different design methods, the amount of sampling, temperatures (for flexible
 backbone sampling), and additional Rosetta options.
 Example command lines:
-    setup.py backrub
-    setup.py backrub --temperature 1.2 --output_directory testrun --domains PF00013 --domains PF00018
+    setup.py default_scoring  backrub
+    setup.py my_new_scoring  backrub --temperature 1.2 --output_directory testrun --domains PF00013 --domains PF00018
 
 
 Usage:
-    setup.py <method> [--domains=DOMAIN1 ...] [options]
+    setup.py <benchmark_name> <method> [--domains=DOMAIN1 ...] [options]
 
 Arguments:
+
+    <benchmark_name>
+        This is a name for the benchmark run e.g. "Scoring function 1.1". The same benchmark run will probably be
+        used to test multiple methods. This name is stored in a metadata file (benchmarks.json) which is later
+        used in the analysis to generate plots.
 
     <method>
         A Rosetta method to execute. The methods currently available are:
@@ -104,6 +114,10 @@ Options:
     --settings SETTINGS_FILE
         By default, protocols/rosetta/settings.json is used the load the benchmark settings (paths to Rosetta etc.). This
         location can be overridden with this option.
+
+    --title TITLE
+        Specify a different title for the benchmark run. This will be set by default to allow analysis results to be grouped
+        but can be overridden here or changed in benchmarks.json later. 
 """
 
 import sys
@@ -125,7 +139,9 @@ script_preamble = '''#!/usr/bin/env python2
 #$ -cwd
 #$ -r y
 #$ -j y
-#$ -l h_rt=24:00:00
+#$ -o %(job_directory)s
+#$ -e %(job_directory)s
+#$ -l h_rt=%(expected_time)s
 #$ -t 1-%(nstruct)s
 #$ -l mem_free=2G
 #$ -l arch=linux-x64
@@ -137,10 +153,40 @@ import datetime
 import shlex
 import subprocess
 
+
+def Popen_shell(cmd, outdir = os.getcwd()):
+    subp = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=outdir)
+    output = subp.communicate()
+    return output[0], output[1], subp.returncode
+
+class bufferless_output(object):
+    
+    def __init__(self, output):
+        self.output = output
+
+    def write(self, str):
+        self.output.write(str)
+        self.output.flush()
+        if not self.output.isatty():
+            os.fsync(self.output.fileno()) # force write
+    
+    def __getattr__(self, attr):
+        return getattr(self.output, attr)
+    
+
+sge_task_id, job_id = 1, 1
+try: sge_task_id = long(os.environ["SGE_TASK_ID"])
+except: pass
+try: job_id = long(os.environ["JOB_ID"])
+except: pass
+
+t1 = datetime.datetime.now()
+sys.stdout = bufferless_output(sys.stdout)
+sys.stderr = bufferless_output(sys.stderr)
+
 print "Python version:", sys.version
 print "Hostname:", socket.gethostname()
-print "Time:", datetime.datetime.now()
-sge_task_id = long(os.environ["SGE_TASK_ID"])
+print "Time:", t1
 print "Task:", sge_task_id
 
 rosetta_env = os.environ.copy()
@@ -159,20 +205,30 @@ except KeyError:
 
 simple_step_commands = '''
 # %(step)s step
+print "Starting %(step)s step"
 args = shlex.split(%(command_line)s)
-rosetta_process = subprocess.Popen(args, stdout=subprocess.PIPE, cwd="%(job_directory)s", env=rosetta_env)
+rosetta_process = subprocess.Popen(args, cwd="%(job_directory)s", env=rosetta_env)
 out, err = rosetta_process.communicate()
 sys.stdout.write(out or '')
 sys.stdout.flush()
 if err:
     sys.stderr.write(err)
 return_code = rosetta_process.returncode
-print "%(method)s return code", return_code
+print "%(step)s return code", return_code
 print ""
 '''
 
 script_epilog = '''
-print "Time:", datetime.datetime.now()
+t2 = datetime.datetime.now()
+print "Time:", t2
+try:
+    time_diff = t2 -t1
+    tminutes, tseconds = divmod(time_diff.days * 86400 + time_diff.seconds, 60)
+    print('Time taken: {0}m {1}s'.format(tminutes, tseconds))
+    mem_usage, stderr, returncode = Popen_shell('qstat -j ' + str(job_id) + ' | grep -E "usage +' + str(sge_task_id) + '" | sed "s/.*maxvmem=//"')
+    print 'Memory usage:', mem_usage
+except: pass
+
 '''
 
 
@@ -194,9 +250,11 @@ def create_script(job_script_path, job_parameters):
 
 if __name__ == '__main__':
     print('')
+    json_filename = 'benchmarks.json'
     benchmark_root = os.path.abspath(os.path.join('..', '..'))
     arguments = docopt.docopt(__doc__)
 
+    benchmark_name = arguments['<benchmark_name>']
     method = arguments['<method>']
     restricted_to_domains = arguments['--domains']
 
@@ -223,7 +281,7 @@ if __name__ == '__main__':
     p = subprocess.Popen(['qstat'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = p.communicate()
     if p.returncode == 0:
-        run_jobs_on_cluster = arguments['--setup_only']
+        run_jobs_on_cluster = not(arguments['--setup_only'])
         rosetta_path = settings['cluster_rosetta_installation_path']
     else:
         rosetta_path = settings['local_rosetta_installation_path']
@@ -247,6 +305,10 @@ if __name__ == '__main__':
                 print('Warning: The MySQL library path "{0}" could not be found.'.format(mysql_lib_path))
         ld_path_extension = mysql_path_extension.format(mysql_lib_path)
 
+    # Sanity check
+    if '--temperature' in sys.argv and not(method_details.get('uses_temperature')):
+        print('\nWARNING: A temperature was specified but this method does not use this parameter.\n')
+    
     # Set up run parameters
     benchmark_parameters = dict(
         rosetta_database_path = rosetta_database_path,
@@ -258,6 +320,7 @@ if __name__ == '__main__':
         extra_flags = [],
         ld_path_extension = ld_path_extension,
         method = method,
+        expected_time = "24:00:00",
     )
     if arguments['--talaris2014']:
         benchmark_parameters['extra_flags'].append('-talaris2014 true')
@@ -267,6 +330,7 @@ if __name__ == '__main__':
         restricted_to_domains = ['PF00013', 'PF00018']
         benchmark_parameters['nstruct'] = 5
         benchmark_parameters['ntrials'] = 100
+        benchmark_parameters['expected_time'] = "00:29:00"
 
     # Add the flags file parameter
     if arguments['--flags']:
@@ -294,6 +358,41 @@ if __name__ == '__main__':
     except: pass
     if not os.path.exists(output_directory):
         die('The output directory {0} could not be created.'.format(output_directory))
+
+    # Create the JSON file used in analysis
+    title = 'Untitled'
+    if arguments['--title']:
+        title = arguments['--title']
+    elif method_details.get('default_title'):
+        title = method_details['default_title']
+    elif method_details.get('uses_temperature'):
+        title = str(benchmark_parameters['temperature'])
+    method_dict_title = method
+    if method_details['uses_temperature']:
+        method_dict_title = '{0}_{1}'.format(method, benchmark_parameters['temperature'])
+        
+    run_details = {
+        benchmark_name : {
+            method_dict_title : dict(
+                method = method,
+                title = title,
+                file_filter = method_details['file_filter'] % benchmark_parameters,
+            )
+        }
+    }
+    if method_details['uses_temperature']:
+        run_details[benchmark_name][method_dict_title]['kT'] = str(benchmark_parameters['temperature'])
+    json_location = os.path.join(output_directory, json_filename)
+    main_dict = {}
+    if os.path.exists(json_location):
+        main_dict = json.loads(read_file(json_location))
+    if benchmark_name in main_dict:
+        if method_dict_title in main_dict[benchmark_name]:
+            print('Overwriting previous entry for {0}, {1} in {2}.'.format(benchmark_name, method_dict_title, json_filename))
+        main_dict[benchmark_name].update(run_details[benchmark_name])
+    else:
+        main_dict.update(run_details)
+    write_file(json_location, json.dumps(main_dict, sort_keys = True, indent = 4))
 
     # Create the array jobs and submit them if appropriate
     input_pdbs = []
@@ -325,9 +424,11 @@ if __name__ == '__main__':
     else:
         benchmark_run_script = os.path.join(output_directory, 'run_benchmark.sh')
         write_file(benchmark_run_script, run_script)
+        os.chmod(benchmark_run_script, 0755)  
         if run_jobs_on_cluster:
+            print('\nSubmitting jobs:')
             subprocess.call(benchmark_run_script)
-            print('\nJobs for {0} domains have been submitted.\n'.format(len(input_pdbs)))
+            print('Jobs for {0} domains have been submitted.\n'.format(len(input_pdbs)))
         else:
             print('\nJobs for {0} domains have been set up:\nExecute {1} to run the benchmark.\n'.format(len(input_pdbs), benchmark_run_script))
 
