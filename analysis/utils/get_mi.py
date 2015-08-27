@@ -28,80 +28,91 @@ import numpy
 from fsio import read_file
 
 canonical_aas = 'ACDEFGHIKLMNPQRSTVWY'
-aa_matrix_column_indices = {}
-for x in range(len(canonical_aas)):
-    aa_matrix_column_indices[canonical_aas[x]] = x
+
+class SequenceMatrix(object):
+    '''A class to contain a list of sequences and present them as a numpy matrix for processing.'''
+
+    def __init__(self, sequences, expectn = None, remove_gap_indices = False):
+        '''Checks to make sure that we can compute values over the sequences.'''
+
+        # Create a indexing from amino acid type to columns
+        aa_matrix_column_indices = {}
+        aas_ = sorted(list(canonical_aas))
+        for x in range(len(aas_)):
+            aa_matrix_column_indices[aas_[x]] = x
+        self.aa_matrix_column_indices = aa_matrix_column_indices
+        self.remove_gap_indices = remove_gap_indices
+        self.expectn = expectn
+        self.sequences = sequences
+        self.matrix = None
+        self.gap_indices = []
+        self.update()
 
 
-def check_sequences(sequences, expectn = None, remove_gap_indices = False):
-    '''Checks to make sure that we can compute values over the sequences.'''
+    def update(self):
+        '''Converts the sequences into a numpy matrix.'''
 
-    # Make sure that all sequences have the same length
-    length = set([len(s) for s in sequences])
-    assert(len(length) == 1)
-    length = length.pop()
-    positions = range(length)
-
-    # If there are gaps, make sure that the gaps always occur in the same positions
-    gap_frequencies = dict.fromkeys(positions, 0)
-    for s in sequences:
-        for i in positions:
-            if s[i] == '-':
-                gap_frequencies[i] += 1
-                gaps_exist = True
-    gap_indices = [i for i, v in gap_frequencies.iteritems() if v]
-    for i in positions:
-        assert(gap_frequencies[i] == 0 or gap_frequencies[i] == len(sequences))
-    if gap_indices and remove_gap_indices:
-        new_sequences = [s.replace('-', '') for s in sequences]
-        sequences = new_sequences
+        # Make sure that all sequences have the same length
+        sequences = self.sequences
         length = set([len(s) for s in sequences])
         assert(len(length) == 1)
         length = length.pop()
-        gap_indices = [] # we remove the indexed positions from the sequences
+        positions = range(length)
 
-    # Make sure that we have the correct number of sequences
-    if expectn and len(sequences) != expectn:
-        raise Exception('Expected {0} records in but read {2}.'.format(expectn, len(sequences)))
-
-    return sequences, gap_indices
-
-
-def convert_sequence_list_to_numpy_array(sequences, expectn = None, remove_gap_indices = False):
-    sequences, gap_indices = check_sequences(sequences, expectn = expectn, remove_gap_indices = remove_gap_indices)
-    return numpy.array([list(seq) for seq in sequences]), gap_indices
-
-
-def calculate_entropy_from_sequence_list(sequences, expectn = None, remove_gap_indices = False):
-    '''Calculates the sequence entropy for the list of sequences. If gaps exists then they must exist at the same positions
-       in all sequences. If remove_gap_indices is True then gap positions will be ignored and the indices adjusted accordingly.
-       If remove_gap_indices is False then the sequence entropy for the gapped positions will be included and set to None.'''
-
-    all_sequences, gap_indices = convert_sequence_list_to_numpy_array(sequences, expectn = expectn, remove_gap_indices = remove_gap_indices)
-    num_sequences, sequence_length = numpy.shape(all_sequences)
-    positions = range(sequence_length)
-
-    # Calculate sequence entropy
-    all_sequences = numpy.array([list(seq) for seq in sequences])
-    with numpy.errstate(divide='ignore', invalid='ignore'):
-        count_matrix = numpy.zeros((sequence_length, 20))
+        # If there are gaps, make sure that the gaps always occur in the same positions
+        gap_frequencies = dict.fromkeys(positions, 0)
+        for s in sequences:
+            for i in positions:
+                if s[i] == '-':
+                    gap_frequencies[i] += 1
+                    gaps_exist = True
+        gap_indices = [i for i, v in gap_frequencies.iteritems() if v]
         for i in positions:
-            if i not in gap_indices:
-                position_aas = all_sequences[:,i]
-                unique, counts = numpy.unique(position_aas, return_counts=True) # this returns the SORTED unique elements of the array so we can use counts directly as
-                for cx in range(len(unique)):
-                     count_matrix[i][aa_matrix_column_indices[unique[cx]]] = counts[cx]
-        count_matrix = count_matrix / num_sequences
-        count_matrix = -1.0 * count_matrix * (numpy.log(count_matrix)/numpy.log(20))
-        entropies = numpy.nansum(count_matrix, axis = 1) # sum up the rows (sequence positions), treating NaN as zero
-        for i in positions:
-            if i in gap_indices:
-                entropies[i] = None
-        entropies = dict(zip(positions, entropies.tolist())) # convert the vector to a dict indexed by position. Note: we use numpy.nan instead of None as before so we may hit some errors
+            assert(gap_frequencies[i] == 0 or gap_frequencies[i] == len(sequences))
+        if gap_indices and self.remove_gap_indices:
+            new_sequences = [s.replace('-', '') for s in sequences]
+            sequences = new_sequences
+            length = set([len(s) for s in sequences])
+            assert(len(length) == 1)
+            length = length.pop()
+            gap_indices = [] # we remove the indexed positions from the sequences
 
-    print(entropies)
-    sys.exit(0)
-    return entropies
+        # Make sure that we have the correct number of sequences
+        if self.expectn and len(sequences) != self.expectn:
+            raise Exception('Expected {0} records in but read {2}.'.format(self.expectn, len(sequences)))
+
+        self.gap_indices = gap_indices
+        self.sequences = sequences
+        self.matrix = numpy.array([list(seq) for seq in sequences])
+
+
+    def get_sequence_entropy(self):
+        '''Calculates the sequence entropy for the list of sequences. If gaps exists then they must exist at the same positions
+           in all sequences. If remove_gap_indices is True then gap positions will be ignored and the indices adjusted accordingly.
+           If remove_gap_indices is False then the sequence entropy for the gapped positions will be included and set to None.'''
+
+        sequence_matrix, gap_indices, aa_matrix_column_indices = self.matrix, self.gap_indices, self.aa_matrix_column_indices
+        num_sequences, sequence_length = numpy.shape(sequence_matrix)
+        positions = range(sequence_length)
+
+        # Calculate sequence entropy
+        with numpy.errstate(divide='ignore', invalid='ignore'):
+            count_matrix = numpy.zeros((sequence_length, 20))
+            for i in positions:
+                if i not in gap_indices:
+                    position_aas = sequence_matrix[:,i]
+                    unique, counts = numpy.unique(position_aas, return_counts=True) # this returns the SORTED unique elements of the array so we can use counts directly as
+                    for cx in range(len(unique)):
+                         # todo: It may be quicker to add the row in one operation. Benchmark this.
+                         count_matrix[i][aa_matrix_column_indices[unique[cx]]] = counts[cx]
+            count_matrix = count_matrix / num_sequences
+            count_matrix = -1.0 * count_matrix * (numpy.log(count_matrix)/numpy.log(20))
+            entropies = numpy.nansum(count_matrix, axis = 1) # sum up the rows (sequence positions), treating NaN as zero
+            for i in positions:
+                if i in gap_indices:
+                    entropies[i] = None
+            entropies = dict(zip(positions, entropies.tolist())) # convert the vector to a dict indexed by position. Note: we use numpy.nan instead of None as before so we may hit some errors
+        return entropies
 
 
 def get_MI(length, entropies, joint_entropies):

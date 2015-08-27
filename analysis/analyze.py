@@ -94,7 +94,7 @@ from libraries import docopt
 from libraries import colortext
 from utils.fsio import read_file, write_file, get_file_lines
 from utils.pdb import PDB
-from utils.get_mi import create_mi_file, calculate_entropy_from_sequence_list
+from utils.get_mi import create_mi_file, SequenceMatrix
 from utils.rplot import run_r_script
 from covariation_similarity.covariation_similarity import compute_overlap
 from profile_similarity.profile_similarity import get_covarying_pairs, get_rosetta_sequence, get_natural_sequences, background
@@ -269,7 +269,9 @@ class Analyzer(object):
                         sequence += '-'
                 sequences.append(sequence)
 
-            entropies = calculate_entropy_from_sequence_list(sequences)
+            sequence_matrix = SequenceMatrix(sequences)
+            entropies = sequence_matrix.get_sequence_entropy()
+            #entropies = calculate_entropy_from_sequence_list(sequences)
             for position_id, entropy in sorted(entropies.iteritems()):
                 if entropy != None:
                     assert(abs(published_natural_entropies[(domain_id, position_id)] - entropy) < 0.0001)
