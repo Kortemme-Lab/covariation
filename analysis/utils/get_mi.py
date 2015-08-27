@@ -27,12 +27,35 @@ import operator
 import numpy
 from fsio import read_file
 
-def calculate_entropy(sequences, expectn = None):
 
+def calculate_entropy(sequences, expectn = None, remove_gap_indices = False):
+    '''Calculates the sequence entropy for the list of sequences. If gaps exists then they must exist at the same positions
+       in all sequences. If remove_gap_indices is True then gap positions will be ignored and the indices adjusted accordingly.
+       If remove_gap_indices is False then the sequence entropy for the gapped positions will be included and set to None.'''
 
     length = set([len(s) for s in sequences])
     assert(len(length) == 1)
     length = length.pop()
+    positions = range(length)
+
+    # If there are gaps, make sure that the gaps always occur in the same positions
+    gap_frequencies = dict.fromkeys(positions, 0)
+    for s in sequences:
+        for i in positions:
+            if s[i] == '-':
+                gap_frequencies[i] += 1
+                gaps_exist = True
+    gap_indices = [i for i, v in gap_frequencies.iteritems() if v]
+    for i in positions:
+        assert(gap_frequencies[i] == 0 or gap_frequencies[i] == len(sequences))
+    if gap_indices and remove_gap_indices:
+        new_sequences = [s.replace('-', '') for s in sequences]
+        sequences = new_sequences
+        length = set([len(s) for s in sequences])
+        assert(len(length) == 1)
+        length = length.pop()
+        positions = range(length)
+        gap_indices = [] # we remove the indexed positions from the sequences
 
 #use numpy here
 
@@ -47,7 +70,10 @@ def calculate_entropy(sequences, expectn = None):
     counts = {}
     frequencies = {}
 
-    for i in range(0, length):
+    for i in positions:
+        if i in gap_indices:
+            entropies[i] = None
+            continue
         counts[i] = dict.fromkeys(aa, 0)
         for seq in sequences:
             counts[i][seq[i]] += 1

@@ -129,7 +129,6 @@ class Analyzer(object):
 
         # Read in the domain and native sequence data
         self.get_domain_sequences(read_file('domain_sequences.txt'))
-        print(self.domain_sequences)
         self.determine_positions_for_entropy_calculation()
         sys.exit(0)
         #PF00013 1WVN_A THELTIPNNLIGCIIGRQGANINEIRQMSGAQIKI-----ANP-------VEGSSGRQVTITG-SAASISLAQYLI
@@ -219,19 +218,31 @@ class Analyzer(object):
     # Setup scripts
 
     def determine_positions_for_entropy_calculation(self):
-        '''Computes the profile similarity for a domain based on the mutual information and FASTA file.'''
-        domain_sequences = self.domain_sequences
-        total_num_conserved_positions = 0
-        total_num_varying_positions = 0
+        '''Computes the natural sequence entropy for the natural domains.'''
 
+        domain_sequences = self.domain_sequences
+        domain_entropies = {}
+
+        expected_positions = []
+        for l in sorted(get_file_lines(os.path.join('published_data', 'entropy_table', 'valid_positions'))):
+            if l.strip():
+                ts = l.strip().split('_')
+                assert(len(ts) == 2)
+                expected_positions.append((ts[0], int(ts[1])))
+
+        published_natural_entropies = {}
+        for l in sorted(get_file_lines(os.path.join('published_data', 'sequence_entropy_backrub.txt'))[1:]):
+            if l.strip() and l.startswith('PF'):
+                ts = l.split('\t')
+                published_natural_entropies[(ts[0], int(ts[1]))] = float(ts[2])
+
+        determined_positions = []
         for f in sorted(glob.glob(os.path.join('natural_alignments', '*.align.80'))):
             sequences = []
             num_conserved_positions = 0
             num_varying_positions = 0
             lines = [l.strip() for l in get_file_lines(f) if l.strip() and not(l.startswith('>'))]
             domain_id = os.path.split(f[:f.find('.align.80')])[1]
-            if domain_id != 'PF00013':
-                continue
             pdb_chain_id = domain_sequences[domain_id]
             indices_file = os.path.join('indices', '%s.indices' % pdb_chain_id)
             assert(os.path.exists(indices_file))
@@ -244,46 +255,29 @@ class Analyzer(object):
                 assert(len(l) == expected_length)
                 for x in positions:
                     if l[x] == '-' or l[x] not in canonical_aas:
-                        if l[x] != '-':
-                            print(l[x])
                         conserved_positions[x] = False
-                    else:
-                        if not('A' <= l[x] <= 'Y'):
-                            print(domain_id, pdb_chain_id, len(indices_lines), int(indices_lines[-1].split()[0]) + 1)
-                            print(l[x])
+            for x in positions:
+                if conserved_positions[x]:
+                    determined_positions.append((domain_id, x))
 
             for l in lines:
                 sequence = ''
                 for x in positions:
                     if conserved_positions[x]:
                         sequence += l[x]
+                    else:
+                        sequence += '-'
                 sequences.append(sequence)
 
-            for x in conserved_positions:
-                if x:
-                    num_conserved_positions += 1
-                else:
-                    num_varying_positions += 1
-            total_num_conserved_positions += num_conserved_positions
-            total_num_varying_positions += num_varying_positions
-            print(domain_id, pdb_chain_id, len(indices_lines), int(indices_lines[-1].split()[0]) + 1, total_num_conserved_positions, total_num_varying_positions)
             entropies = calculate_entropy(sequences)
-            print(entropies)
-            sys.exit(0)
-            #break
+            for position_id, entropy in sorted(entropies.iteritems()):
+                if entropy != None:
+                    assert(abs(published_natural_entropies[(domain_id, position_id)] - entropy) < 0.0001)
+            domain_entropies[domain_id] = entropies
 
-        print(total_num_conserved_positions, total_num_conserved_positions_2)
-        print(total_num_varying_positions)
-
-
-
-
-
-
-            #
-            #print(lines)
-
-
+        assert(sorted(determined_positions) == sorted(expected_positions))
+        self.domain_entropies = domain_entropies
+        
 
     def get_domain_sequences(self, domain_sequences_file_content):
         domain_sequences = {}
