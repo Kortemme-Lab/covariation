@@ -95,12 +95,13 @@ def calculate_entropy(squences, expectn = None, remove_gap_indices = False):
         print('Time taken: %s' % str(t2-t1))
 
         # New code
+        all_sequences = numpy.array([list(seq) for seq in sequences])
         t2 = time.time()
-        if True:#with numpy.errstate(divide='ignore', invalid='ignore'):
+        with numpy.errstate(divide='ignore', invalid='ignore'):
             count_matrix = numpy.zeros((length, 20))
             for i in positions:
                 if i not in gap_indices:
-                    position_aas = numpy.array([seq[i] for seq in sequences])
+                    position_aas = all_sequences[:,i]
                     unique, counts = numpy.unique(position_aas, return_counts=True) # this returns the SORTED unique elements of the array so we can use counts directly as
                     for cx in range(len(unique)):
                          count_matrix[i][aa_position[unique[cx]]] = counts[cx]
@@ -116,7 +117,7 @@ def calculate_entropy(squences, expectn = None, remove_gap_indices = False):
             print('Time taken: %s' % str(t3-t2))
 
         print('%d\t%f' % (len(sequences), new_code/old_code))
-        continue
+
         # Sanity check
         assert(entropies.keys() == entropies_p.keys())
         for k, v in entropies.iteritems():
