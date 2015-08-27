@@ -100,8 +100,10 @@ def calculate_entropy(squences, expectn = None, remove_gap_indices = False):
             count_matrix = numpy.zeros((length, 20))
             for i in positions:
                 if i not in gap_indices:
-                    for seq in sequences:
-                        count_matrix[i][aa_position[seq[i]]] += 1
+                    position_aas = numpy.array([seq[i] for seq in sequences])
+                    unique, counts = numpy.unique(position_aas, return_counts=True) # this returns the SORTED unique elements of the array so we can use counts directly as
+                    for cx in range(len(unique)):
+                         count_matrix[i][aa_position[unique[cx]]] = counts[cx]
             count_matrix = count_matrix / num_sequences
             count_matrix = -1.0 * count_matrix * (numpy.log(count_matrix)/numpy.log(20))
             entropies = numpy.nansum(count_matrix, axis = 1) # sum up the rows (sequence positions), treating NaN as zero
@@ -114,6 +116,14 @@ def calculate_entropy(squences, expectn = None, remove_gap_indices = False):
             print('Time taken: %s' % str(t3-t2))
 
         print('%d\t%f' % (len(sequences), new_code/old_code))
+        continue
+        # Sanity check
+        assert(entropies.keys() == entropies_p.keys())
+        for k, v in entropies.iteritems():
+            if numpy.isnan(entropies[k]):
+                assert(entropies_p[k] == None)
+            else:
+                assert(abs(entropies[k] - entropies_p[k]) < 0.00001)
 
     sys.exit(0)
 
