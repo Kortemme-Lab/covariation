@@ -60,20 +60,22 @@ def calculate_entropy(sequences, expectn = None, remove_gap_indices = False):
 #use numpy here
 
     aa = 'ACDEFGHIKLMNPQRSTVWY'
-    count_matrix = numpy.zeros((length, 20))
-
+    count_matrix = numpy.zeros((length, 20), dtype=[(a, numpy.float64) for a in aa])
     num_sequences = float(len(sequences))
     if expectn and len(sequences) != expectn:
         raise Exception('Expected {0} records in but read {2}.'.format(expectn, len(sequences)))
 
+    import time
+
+    t1 = time.time()
     entropies = {}
     counts = {}
     frequencies = {}
-
     for i in positions:
         if i in gap_indices:
             entropies[i] = None
             continue
+
         counts[i] = dict.fromkeys(aa, 0)
         for seq in sequences:
             counts[i][seq[i]] += 1
@@ -85,6 +87,37 @@ def calculate_entropy(sequences, expectn = None, remove_gap_indices = False):
             if freq > 0:
                 xsum += -1 * freq * math.log(freq,20)
         entropies[i] = xsum
+        print(i, entropies[i])
+        break
+    t2 = time.time()
+    print('Time taken: %s' % str(t2-t1))
+
+    t2 = time.time()
+    entropies = {}
+    counts = {}
+    frequencies = {}
+    log_array = numpy.array([20.0] * 20)
+    minus_array = numpy.array([-1.0] * 20)
+    #print(log_array)
+    for i in positions:
+        if i in gap_indices:
+            entropies[i] = None
+            continue
+        counts = dict.fromkeys(aa, 0)
+        for seq in sequences:
+            count_matrix[i][seq[i]] += 1
+            counts[seq[i]] += 1
+
+        na = numpy.array(counts.values()) / num_sequences
+        na = -1.0 * na * (numpy.log(na)/numpy.log(20))
+        num_sum = numpy.sum(na[~numpy.isnan(na)])
+        entropies[i] = num_sum
+        print(i, entropies[i])
+        break
+    t3 = time.time()
+    print('Time taken: %s' % str(t3-t2))
+
+    sys.exit(0)
     return entropies
 
 

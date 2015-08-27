@@ -277,7 +277,7 @@ class Analyzer(object):
 
         assert(sorted(determined_positions) == sorted(expected_positions))
         self.domain_entropies = domain_entropies
-        
+
 
     def get_domain_sequences(self, domain_sequences_file_content):
         domain_sequences = {}
