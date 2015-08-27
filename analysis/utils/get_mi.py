@@ -115,14 +115,6 @@ def calculate_entropy(squences, expectn = None, remove_gap_indices = False):
 
         print('%d\t%f' % (len(sequences), new_code/old_code))
 
-        # Sanity check
-        assert(entropies.keys() == entropies_p.keys())
-        for k, v in entropies.iteritems():
-            if numpy.isnan(entropies[k]):
-                assert(entropies_p[k] == None)
-            else:
-                assert(abs(entropies[k] - entropies_p[k]) < 0.00001)
-
     sys.exit(0)
 
     return entropies
