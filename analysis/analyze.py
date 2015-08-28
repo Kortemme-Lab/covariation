@@ -115,6 +115,8 @@ class Analyzer(object):
         self.expectn = expectn
         self.domain_sequences = None
         self.native_sequences = None
+        self.valid_positions = {} # a mapping from Pfam domain to residue positions which never contain gaps or non-canonicals in the native sequences
+        self.natural_domain_entropies = {} # the entropies of valid positions in the natural domains
         self.analysis_file_prefix = analysis_file_prefix
         self.published_data_methods = published_data_methods
         self.backrub_method_prefix = backrub_method_prefix
@@ -221,7 +223,7 @@ class Analyzer(object):
         '''Computes the natural sequence entropy for the natural domains.'''
 
         domain_sequences = self.domain_sequences
-        domain_entropies = {}
+        natural_domain_entropies = {}
 
         expected_positions = []
         for l in sorted(get_file_lines(os.path.join('published_data', 'entropy_table', 'valid_positions'))):
@@ -236,49 +238,69 @@ class Analyzer(object):
                 ts = l.split('\t')
                 published_natural_entropies[(ts[0], int(ts[1]))] = float(ts[2])
 
-        determined_positions = []
-        for f in sorted(glob.glob(os.path.join('natural_alignments', '*.align.80'))):
-            sequences = []
-            num_conserved_positions = 0
-            num_varying_positions = 0
-            lines = [l.strip() for l in get_file_lines(f) if l.strip() and not(l.startswith('>'))]
-            domain_id = os.path.split(f[:f.find('.align.80')])[1]
-            pdb_chain_id = domain_sequences[domain_id]
-            indices_file = os.path.join('indices', '%s.indices' % pdb_chain_id)
-            assert(os.path.exists(indices_file))
-            indices_lines = [l.strip() for l in get_file_lines(indices_file) if l.strip()]
-            expected_length = int(indices_lines[-1].split()[0]) + 1
-            conserved_positions = [True] * expected_length
+        colortext.wgreen('\nUnit-testing sequence entropy calculator: ')
+        try:
+            determined_positions = []
+            for f in sorted(glob.glob(os.path.join('natural_alignments', '*.align.80'))):
+                sequences = []
+                num_conserved_positions = 0
+                num_varying_positions = 0
+                lines = [l.strip() for l in get_file_lines(f) if l.strip() and not(l.startswith('>'))]
+                domain_id = os.path.split(f[:f.find('.align.80')])[1]
+                pdb_chain_id = domain_sequences[domain_id]
+                indices_file = os.path.join('indices', '%s.indices' % pdb_chain_id)
+                assert(os.path.exists(indices_file))
+                indices_lines = [l.strip() for l in get_file_lines(indices_file) if l.strip()]
+                expected_length = int(indices_lines[-1].split()[0]) + 1
+                conserved_positions = [True] * expected_length
 
-            positions = range(expected_length)
-            for l in lines:
-                assert(len(l) == expected_length)
-                for x in positions:
-                    if l[x] == '-' or l[x] not in canonical_aas:
-                        conserved_positions[x] = False
-            for x in positions:
-                if conserved_positions[x]:
-                    determined_positions.append((domain_id, x))
-
-            for l in lines:
-                sequence = ''
+                positions = range(expected_length)
+                for l in lines:
+                    assert(len(l) == expected_length)
+                    for x in positions:
+                        if l[x] == '-' or l[x] not in canonical_aas:
+                            conserved_positions[x] = False
                 for x in positions:
                     if conserved_positions[x]:
-                        sequence += l[x]
-                    else:
-                        sequence += '-'
-                sequences.append(sequence)
+                        determined_positions.append((domain_id, x))
 
-            sequence_matrix = SequenceMatrix(sequences)
-            entropies = sequence_matrix.get_sequence_entropy()
-            #entropies = calculate_entropy_from_sequence_list(sequences)
-            for position_id, entropy in sorted(entropies.iteritems()):
-                if entropy != None:
-                    assert(abs(published_natural_entropies[(domain_id, position_id)] - entropy) < 0.0001)
-            domain_entropies[domain_id] = entropies
+                for l in lines:
+                    sequence = ''
+                    for x in positions:
+                        if conserved_positions[x]:
+                            sequence += l[x]
+                        else:
+                            sequence += '-'
+                    sequences.append(sequence)
 
-        assert(sorted(determined_positions) == sorted(expected_positions))
-        self.domain_entropies = domain_entropies
+                sequence_matrix = SequenceMatrix(sequences)
+                entropies = sequence_matrix.get_sequence_entropy()
+                for position_id, entropy in sorted(entropies.iteritems()):
+                    if not numpy.isnan(entropy):
+                        assert(abs(published_natural_entropies[(domain_id, position_id)] - entropy) < 0.0001)
+                natural_domain_entropies[domain_id] = entropies
+            assert(sorted(determined_positions) == sorted(expected_positions))
+        except Exception, e:
+            colortext.error('Failed')
+            print(str(e))
+            print(traceback.format_exc())
+            print('')
+            sys.exit(1)
+        colortext.message('Passed.')
+
+        # Check against the expected positions
+        valid_positions = {}
+        valid_positions_list = [[(domain_id, position_id)for position_id, entropy in sorted(entropies.iteritems()) if not numpy.isnan(entropy)] for domain_id, entropies in sorted(natural_domain_entropies.iteritems())]
+        valid_positions_list = [i for sublist in valid_positions_list for i in sublist]
+        num_valid_positions = len(valid_positions_list)
+        for tpl in valid_positions_list:
+            valid_positions[tpl[0]] = valid_positions.get(tpl[0], set())
+            valid_positions[tpl[0]].add(tpl[1])
+        if not(num_valid_positions == 3009):
+            colortext.error('Expected 3009 positions but only read in entropies for {0} positions.'.format(num_valid_positions))
+        print('')
+        self.valid_positions = valid_positions
+        self.natural_domain_entropies = natural_domain_entropies
 
 
     def get_domain_sequences(self, domain_sequences_file_content):

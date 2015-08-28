@@ -106,7 +106,7 @@ for c in colors:
             allow_colors = True
     except: pass
     if allow_colors:
-        setattr(sys.modules[__name__], 'w'  + c, lambda s, c=c : write(s, color = c))
+        setattr(sys.modules[__name__], 'w'  + c, lambda s, c=c : write(s, color = c, flush = True))
         setattr(sys.modules[__name__], 'p'  + c, lambda s, c=c : printf(s, color = c))
         setattr(sys.modules[__name__], 'm'  + c, lambda s, c=c : make(s, color = c))
     else:
