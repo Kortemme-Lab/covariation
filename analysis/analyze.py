@@ -117,6 +117,7 @@ class Analyzer(object):
         self.native_sequences = None
         self.valid_positions = {} # a mapping from Pfam domain to residue positions which never contain gaps or non-canonicals in the native sequences
         self.natural_domain_entropies = {} # the entropies of valid positions in the natural domains
+        self.native_sequence_matrices = {} # a mapping from Pfam domain to SequenceMatrix objects
         self.analysis_file_prefix = analysis_file_prefix
         self.published_data_methods = published_data_methods
         self.backrub_method_prefix = backrub_method_prefix
@@ -132,8 +133,6 @@ class Analyzer(object):
         # Read in the domain and native sequence data
         self.get_domain_sequences(read_file('domain_sequences.txt'))
         self.determine_positions_for_entropy_calculation()
-        sys.exit(0)
-        #PF00013 1WVN_A THELTIPNNLIGCIIGRQGANINEIRQMSGAQIKI-----ANP-------VEGSSGRQVTITG-SAASISLAQYLI
         self.get_native_sequences(os.path.join('sequence_recovery', 'native_sequences'))
 
         # Set up which benchmarks we will be analyzing
@@ -224,6 +223,7 @@ class Analyzer(object):
 
         domain_sequences = self.domain_sequences
         natural_domain_entropies = {}
+        native_sequence_matrices = {}
 
         expected_positions = []
         for l in sorted(get_file_lines(os.path.join('published_data', 'entropy_table', 'valid_positions'))):
@@ -273,8 +273,9 @@ class Analyzer(object):
                             sequence += '-'
                     sequences.append(sequence)
 
-                sequence_matrix = SequenceMatrix(sequences)
-                entropies = sequence_matrix.get_sequence_entropy()
+                native_sequence_matrix = SequenceMatrix(sequences)
+                entropies = native_sequence_matrix.get_sequence_entropy()
+                native_sequence_matrices[domain_id] = native_sequence_matrix
                 for position_id, entropy in sorted(entropies.iteritems()):
                     if not numpy.isnan(entropy):
                         assert(abs(published_natural_entropies[(domain_id, position_id)] - entropy) < 0.0001)
@@ -299,8 +300,10 @@ class Analyzer(object):
         if not(num_valid_positions == 3009):
             colortext.error('Expected 3009 positions but only read in entropies for {0} positions.'.format(num_valid_positions))
         print('')
-        self.valid_positions = valid_positions
+
         self.natural_domain_entropies = natural_domain_entropies
+        self.valid_positions = valid_positions
+        self.native_sequence_matrices = native_sequence_matrices
 
 
     def get_domain_sequences(self, domain_sequences_file_content):
@@ -526,6 +529,7 @@ class Analyzer(object):
         profile_similarities = {}
         sequence_recoveries = {}
         average_entropies = {}
+
         for benchmark_id, benchmark_details in sorted(self.benchmark_details.iteritems()):
             covariation_similarities[benchmark_id] = {}
             profile_similarities[benchmark_id] = {}
@@ -547,12 +551,15 @@ class Analyzer(object):
                         indices_directory = os.path.abspath('indices')
                         mutual_information_filepath = os.path.join(sub_dir, Analyzer.get_normalized_run_file(benchmark_id, '.mi'))
                         entropies_filepath = os.path.join(sub_dir, Analyzer.get_normalized_run_file(benchmark_id, '.entropies'))
-                        if self.overwrite_files or not(os.path.exists(mutual_information_filepath)) or not(os.path.exists(entropies_filepath)):
+                        residue_entropies_filepath = os.path.join(sub_dir, Analyzer.get_normalized_run_file(benchmark_id, '.residue.entropies'))
+
+                        if self.overwrite_files or not(os.path.exists(mutual_information_filepath)) or not(os.path.exists(entropies_filepath)) or not(os.path.exists(residue_entropies_filepath)):
                             mi_file, entropies = create_mi_file(domain, read_file(fasta_file), self.domain_sequences, indices_directory)
                             write_file(mutual_information_filepath, mi_file)
                             write_file(entropies_filepath, json.dumps(entropies))
 
                         # Compute the benchmark metrics for each domain
+                        # todo: this is where most of the time is taken in the loop - we could cache these values
                         covariation_similarities[benchmark_id][domain] = self.compute_covariation_similarity(domain, mutual_information_filepath)
                         profile_similarities[benchmark_id][domain] = self.compute_profile_similarity(domain, mutual_information_filepath, fasta_file)
                         sequence_recoveries[benchmark_id][domain] = self.compute_sequence_recovery(domain, fasta_file)
@@ -560,6 +567,12 @@ class Analyzer(object):
                     else:
                         print('Mutual information (.mi) file exists. Skipping generation.' + input_directory)
                     print('')
+            print(benchmark_id)
+            pprint.pprint(covariation_similarities[benchmark_id])
+            pprint.pprint(profile_similarities[benchmark_id])
+            pprint.pprint(sequence_recoveries[benchmark_id])
+            pprint.pprint(average_entropies[benchmark_id])
+            sys.exit(0)
 
         common_domains = set(covariation_similarities[covariation_similarities.keys()[0]].keys())
         for benchmark_id, covariation_similarity_values in covariation_similarities.iteritems():

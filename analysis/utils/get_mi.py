@@ -222,11 +222,14 @@ def create_mi_file(domain, fasta_file_contents, domain_sequences, indices_direct
     pfam_indices = {}
     for line in domain_indices.split('\n'):
         if line.strip():
+            # Column 3 in the indices file is the index into the PDB sequence but this is 1-indexed so we convert it to 0-indexed here
             pfam_indices[int(line.split()[2])-1] = line.split()[0]
-    return compute_mi(pfam_indices, fasta_file_contents, expectn = expectn)
+    return compute_mi(pfam_indices, fasta_file_contents, expectn = expectn, domain = domain)
 
 
-def compute_mi(pfam_indices, fasta_file_contents, expectn = None):
+def compute_mi(pfam_indices, fasta_file_contents, expectn = None, domain = None):
+
+    # pfam_indices is a mapping from PDB sequence indices (zero-indexed) to natural sequence indices (zero-indexed)
 
     gapped_sequences = set()
     gapped_length = 0
@@ -235,6 +238,9 @@ def compute_mi(pfam_indices, fasta_file_contents, expectn = None):
     name = ''
     seq = ''
     test = []
+
+    # Read in the fasta file contents. gapped_sequences should contain expectn sequences of the same length (typically
+    # the number of residues in the original PDB file unless some residues were dropped
     for line in fasta_file_contents.split('\n'):
         if line[0] == ">":
             if name != '':
@@ -245,8 +251,11 @@ def compute_mi(pfam_indices, fasta_file_contents, expectn = None):
         else:
             seq += line.strip()
     gapped_sequences.add(seq)
-    gapped_length = len(seq)
-    sequences = set()
+
+    # Makes sure that all sequences are the same length and remove any that are not
+    # Note: This is somewhat arbitrary since the length of the last sequence is taken. It may be better to raise an
+    #       exception in this case
+    gapped_length = len(seq) # gapped_length is the length of the Rosetta sequences (usually the same as the length of the input PDB sequence)
     ungapped = []
     to_remove = set()
     for seq in gapped_sequences:
@@ -255,6 +264,7 @@ def compute_mi(pfam_indices, fasta_file_contents, expectn = None):
     for seq in to_remove:
         gapped_sequences.remove(seq)
 
+    # Compile a zero-indexed list of positions ("ungapped") which only contain canonical residues
     for i in range(0, gapped_length):
         counter = 0
         for seq in gapped_sequences:
@@ -263,34 +273,46 @@ def compute_mi(pfam_indices, fasta_file_contents, expectn = None):
                 counter += 1
         if counter < 1:
             ungapped.append(i)
-
     length = len(ungapped)
 
+    # Iterate through the list of sequences and, for all positions containing only canonical residues, extract the sequence if there is a mapping to the natural sequences.
+    # This creates a set of truncated sequences (the sequences variable) from the designs with corresponding resiudes in the natural sequences.
+    # Note: this seems dangerous if there are any positions in the FASTA file which contain canonical residues which were removed above
+    # ungapped_seq will contain sequences with only canonical residues which can be mapped to the native sequences
+    # Assuming all sequences are valid at the same positions, ungapped_indices will be a mapping from indices in the (truncated) sequences set to indices in the natural sequence MSA
+    sequences = set()
     ungapped_indices = {}
     for seq in gapped_sequences:
         ungapped_seq = ''
         count = 0
+        print()
+        print(seq)
         for i in ungapped:
             if i in pfam_indices:
                 ungapped_seq += seq[i]
                 ungapped_indices[count] = pfam_indices[i]
                 count += 1
+        print(ungapped_seq)
         sequences.add(ungapped_seq)
         length = len(ungapped_seq)
 
+    # A counter for occurrences of an canonical amino acid
     single = {}
     for a in aa:
         single[a] = 0
 
+    # A counter for paired-occurrences of canonical amino acids
     pair = {}
     for a in aa:
         for b in aa:
             pair[a+b] = 0
 
+    # Make sure that we have the expected number of sequences
     num_sequences = float(len(sequences))
     if expectn and len(sequences) != expectn:
         raise Exception('Expected {0} records in but read {2}.'.format(expectn, len(sequences)))
 
+    # This is the calculation of mutual information
     entropies = {}
     counts = {}
     frequencies = {}
@@ -332,5 +354,8 @@ def compute_mi(pfam_indices, fasta_file_contents, expectn = None):
         if Zp[a] < 0:
             Zpx[a] = -1 * Zpx[a]
         s.append(ungapped_indices[i]+"\t"+ungapped_indices[j]+"\t"+str(Z[a])+"\t"+str(Zp[a])+"\t"+str(Zpx[a])+"\t"+str(joint_entropies[a])+"\t"+str(entropies[i])+"\t"+str(entropies[j])+"\n")
+
+    #sequences, ungapped_indices
+
     return ''.join(s), entropies
 
