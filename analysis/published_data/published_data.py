@@ -23,7 +23,6 @@ assert(len(domains) == 40)
 
 published_methods = ['Fixed', '0.3', '0.6', '0.9', '1.2', '1.8', '2.4']
 
-
 def get_method_ids(methods, backrub_method_prefix = '', backrub_method_suffix = ''):
     published_method_names = {'Fixed' : 'Fixed'}
     for m in published_methods[1:]:
@@ -81,3 +80,33 @@ plos_benchmark_data <- data.frame(
 
     return data_frame_string
 
+
+def get_median_metric_data(method, metric):
+    metric = metric.lower()
+
+    if metric not in metric_files:
+        raise Exception('The metric "{0}" is invalid. Please use one of "{1}".'.format(metric, '", "'.join(metric_files.keys())))
+
+    all_metric_values = None
+    try:
+        metric_file = None
+        metric_file = os.path.join(this_dir, metric_files[metric])
+        all_metric_values = open(metric_file).read().strip()
+    except:
+        raise Exception('An error occurred trying to read the metric file "{0}".'.format(metric_file))
+
+    if method not in published_methods:
+        raise Exception('The results for method "{0}" are not available here. Please use one of "{1}".'.format(method, '", "'.join(published_methods)))
+
+    metric_value_lines = [l.strip() for l in all_metric_values.split('\n') if l.strip()]
+    assert(metric_value_lines[0].split() == ['Domain'] + published_methods)
+
+    method_data = {}
+    index = published_methods.index(method)
+    for l in metric_value_lines[1:]:
+        tokens = l.split()
+        assert(len(tokens) == len(published_methods) + 1)
+        domain = domains[int(tokens[0]) - 1] # todo: update this once we add the domain names to the published value files
+        method_data[domain] = float(tokens[index + 1])
+    assert(len(method_data) == 40)
+    return method_data

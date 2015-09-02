@@ -285,14 +285,11 @@ def compute_mi(pfam_indices, fasta_file_contents, expectn = None, domain = None)
     for seq in gapped_sequences:
         ungapped_seq = ''
         count = 0
-        print()
-        print(seq)
         for i in ungapped:
             if i in pfam_indices:
                 ungapped_seq += seq[i]
                 ungapped_indices[count] = pfam_indices[i]
                 count += 1
-        print(ungapped_seq)
         sequences.add(ungapped_seq)
         length = len(ungapped_seq)
 
@@ -355,7 +352,12 @@ def compute_mi(pfam_indices, fasta_file_contents, expectn = None, domain = None)
             Zpx[a] = -1 * Zpx[a]
         s.append(ungapped_indices[i]+"\t"+ungapped_indices[j]+"\t"+str(Z[a])+"\t"+str(Zp[a])+"\t"+str(Zpx[a])+"\t"+str(joint_entropies[a])+"\t"+str(entropies[i])+"\t"+str(entropies[j])+"\n")
 
-    #sequences, ungapped_indices
+    natural_indexed_residue_entropies = {}
+    designed_sequence_matrix = SequenceMatrix(list(sequences))
+    rosetta_indexed_residue_entropies = designed_sequence_matrix.get_sequence_entropy()
+    for rosetta_res_id, entropy in rosetta_indexed_residue_entropies.iteritems():
+        assert(abs(entropy - entropies[rosetta_res_id]) < 0.0001) # todo: sanity check - we can remove this later once we remove the double calculation of entropy
+        natural_indexed_residue_entropies[int(ungapped_indices[rosetta_res_id])] = entropy
 
-    return ''.join(s), entropies
+    return ''.join(s), entropies, natural_indexed_residue_entropies
 

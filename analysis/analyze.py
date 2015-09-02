@@ -98,7 +98,7 @@ from utils.get_mi import create_mi_file, SequenceMatrix
 from utils.rplot import run_r_script
 from covariation_similarity.covariation_similarity import compute_overlap
 from profile_similarity.profile_similarity import get_covarying_pairs, get_rosetta_sequence, get_natural_sequences, background
-from published_data.published_data import get_data_frame
+from published_data.published_data import get_data_frame, get_median_metric_data
 from published_data.published_data import get_method_ids as get_published_method_ids
 from published_data.published_data import published_methods as published_backrub_methods
 
@@ -529,12 +529,14 @@ class Analyzer(object):
         profile_similarities = {}
         sequence_recoveries = {}
         average_entropies = {}
+        residue_entropies = {}
 
         for benchmark_id, benchmark_details in sorted(self.benchmark_details.iteritems()):
             covariation_similarities[benchmark_id] = {}
             profile_similarities[benchmark_id] = {}
             sequence_recoveries[benchmark_id] = {}
             average_entropies[benchmark_id] = {}
+            residue_entropies[benchmark_id] = {}
             input_directory = benchmark_details['root_path']
             assert(os.path.exists(input_directory))
             file_filter = benchmark_details['file_filter']
@@ -550,29 +552,23 @@ class Analyzer(object):
                         domain = os.path.split(sub_dir)[1].split('_')[0]
                         indices_directory = os.path.abspath('indices')
                         mutual_information_filepath = os.path.join(sub_dir, Analyzer.get_normalized_run_file(benchmark_id, '.mi'))
-                        entropies_filepath = os.path.join(sub_dir, Analyzer.get_normalized_run_file(benchmark_id, '.entropies'))
                         residue_entropies_filepath = os.path.join(sub_dir, Analyzer.get_normalized_run_file(benchmark_id, '.residue.entropies'))
 
-                        if self.overwrite_files or not(os.path.exists(mutual_information_filepath)) or not(os.path.exists(entropies_filepath)) or not(os.path.exists(residue_entropies_filepath)):
-                            mi_file, entropies = create_mi_file(domain, read_file(fasta_file), self.domain_sequences, indices_directory)
+                        if self.overwrite_files or not(os.path.exists(mutual_information_filepath)) or not(os.path.exists(residue_entropies_filepath)):
+                            mi_file, entropies, natural_indexed_residue_entropies = create_mi_file(domain, read_file(fasta_file), self.domain_sequences, indices_directory)
                             write_file(mutual_information_filepath, mi_file)
-                            write_file(entropies_filepath, json.dumps(entropies))
+                            write_file(residue_entropies_filepath, json.dumps(natural_indexed_residue_entropies))
 
                         # Compute the benchmark metrics for each domain
                         # todo: this is where most of the time is taken in the loop - we could cache these values
                         covariation_similarities[benchmark_id][domain] = self.compute_covariation_similarity(domain, mutual_information_filepath)
                         profile_similarities[benchmark_id][domain] = self.compute_profile_similarity(domain, mutual_information_filepath, fasta_file)
                         sequence_recoveries[benchmark_id][domain] = self.compute_sequence_recovery(domain, fasta_file)
-                        average_entropies[benchmark_id][domain] = numpy.mean(json.loads(read_file(entropies_filepath)).values())
+                        residue_entropies[benchmark_id][domain] = json.loads(read_file(residue_entropies_filepath))
+                        average_entropies[benchmark_id][domain] = numpy.mean(residue_entropies[benchmark_id][domain].values())
                     else:
                         print('Mutual information (.mi) file exists. Skipping generation.' + input_directory)
                     print('')
-            print(benchmark_id)
-            pprint.pprint(covariation_similarities[benchmark_id])
-            pprint.pprint(profile_similarities[benchmark_id])
-            pprint.pprint(sequence_recoveries[benchmark_id])
-            pprint.pprint(average_entropies[benchmark_id])
-            sys.exit(0)
 
         common_domains = set(covariation_similarities[covariation_similarities.keys()[0]].keys())
         for benchmark_id, covariation_similarity_values in covariation_similarities.iteritems():
@@ -582,10 +578,13 @@ class Analyzer(object):
         common_domains = sorted(common_domains)
 
         colortext.message('Creating analysis plots in {0}.'.format(self.output_directory))
+        self.cross_analyze_methods_and_benchmarks(covariation_similarities, profile_similarities, sequence_recoveries, common_domains)
+        sys.exit(0)
+        #self.analyze_residue_sequence_entropy(residue_entropies, common_domains)
         self.analyze_covariation_similarity(covariation_similarities, common_domains)
         self.analyze_profile_similarity(profile_similarities, common_domains)
         self.analyze_sequence_recovery(sequence_recoveries, common_domains)
-        self.analyze_sequence_entropy(average_entropies, common_domains)
+        self.analyze_mean_sequence_entropy(average_entropies, common_domains)
 
 
         # Compute the best and worst values for each metric. In all of the metrics, it happens that larger values indicate
@@ -615,6 +614,194 @@ class Analyzer(object):
         print('')
 
 
+    def get_scatterplot_title_(self, benchmark_id):
+        details = self.benchmark_details[benchmark_id]
+        if details.get('kT'):
+            method_details = 'kT={0}'.format(str(details.get('kT', '')))
+        else:
+            method_details = str(details.get('kT', ''))
+        #    title = '%(benchmark)s, %(method)s kT=%(kT)s' % details
+        #else:
+        #    title = '%(benchmark)s, %(method)s' % details
+        title = details['benchmark']
+        return title, (details['method'], method_details)
+
+
+    def cross_analyze_methods_and_benchmarks(self, covariation_similarities, profile_similarities, sequence_recoveries, common_domains):
+        '''Create scatterplots comparing the same metrics across different benchmark runs.'''
+
+        benchmark_metrics = [
+            # Metric name, dict name, name in published_data.py
+            ['Covariation similarity', covariation_similarities, 'covariation_similarity', 0.01],
+            ['Sequence recovery', sequence_recoveries, 'sequence_recovery', 0.01],
+            ['Profile similarity', profile_similarities, 'profile_similarity', 0.01],
+        ]
+        filename_prefixes, similarity_ranges = {}, {}
+        for benchmark_metric in benchmark_metrics:
+            filename_prefixes[benchmark_metric[0]] = benchmark_metric[2]
+            similarity_ranges[benchmark_metric[0]] = benchmark_metric[3]
+
+
+        # Read in the published data
+        #published_data = {}
+        data_by_method = {}
+        if self.published_data_methods:
+            for published_data_method in self.published_data_methods:
+                for benchmark_metric in benchmark_metrics:
+                    #published_data[benchmark_metric[0]] = published_data.get(benchmark_metric[0], {})
+                    median_scores_by_domain = get_median_metric_data(published_data_method, benchmark_metric[2])
+                    if published_data_method == 'Fixed':
+                        method = ('Fixed', '')
+                        #published_data[benchmark_metric[0]][('Fixed', '')] = median_scores_by_domain
+                    else:
+                        method = ('backrub', 'kT={0}'.format(str(published_data_method)))
+                    data_by_method[method] = data_by_method.get(method, {})
+                    assert(benchmark_metric[0] not in data_by_method[method])
+                    data_by_method[method][benchmark_metric[0]] = {'Published (score12)' : median_scores_by_domain}
+
+        # Read in the benchmark run data
+        for benchmark_id, benchmark_details in self.benchmark_details.iteritems():
+            title, method = self.get_scatterplot_title_(benchmark_id)
+            data_by_method[method] = data_by_method.get(method, {})
+            for benchmark_metric in benchmark_metrics:
+                data_by_method[method][benchmark_metric[0]] = data_by_method[method].get(benchmark_metric[0], {})
+                if title in data_by_method[method][benchmark_metric[0]]:
+                    colortext.error('Ambiguity: The selected benchmarks do not have unique titles ("{0}"). The scatterplots for comparing benchmark runs over the same methods cannot be created.'.format(title))
+                    return
+                data_by_method[method][benchmark_metric[0]][title] = benchmark_metric[1][benchmark_id]
+
+        # For all comparable sets (same method, same metric), create a scatterplot of the values
+        for method, method_data in data_by_method.iteritems():
+            # method e.g. = ('Fixed', '')
+            for metric_name, benchmark_values in method_data.iteritems():
+                # metric_name e.g. = ('Covariation similarity', '') benchmark_values: benchmark_id -> domain -> value
+                similarity_range = similarity_ranges[metric_name]
+                benchmark_ids = sorted(benchmark_values.keys())
+                for x in range(len(benchmark_ids)):
+                    for y in range(x + 1, len(benchmark_ids)):
+                        benchmark_id_1 = benchmark_ids[x]
+                        benchmark_id_2 = benchmark_ids[y]
+
+                        # Get the list of domains common to both runs
+                        xy_keys = sorted(set(benchmark_values[benchmark_id_1].keys()).intersection(set(benchmark_values[benchmark_id_2].keys())))
+
+                        plot_title = '{0}, {1}'.format(metric_name, '@'.join([a for a in method if a]))
+                        x_axis_label = benchmark_id_1
+                        y_axis_label = benchmark_id_2
+                        data_table_headers = ('Domain', benchmark_id_1, benchmark_id_2, 'Classification')
+                        data_table = []
+                        for domain in xy_keys:
+                            xydiff = benchmark_values[benchmark_id_1][domain] - benchmark_values[benchmark_id_2][domain]
+                            if -similarity_range <= xydiff <= similarity_range:
+                                classification = 'Similar'
+                            elif xydiff > 0:
+                                classification = 'X'
+                            elif xydiff < 0:
+                                classification = 'Y'
+                            data_table.append((domain, benchmark_values[benchmark_id_1][domain], benchmark_values[benchmark_id_2][domain], classification))
+                        file_prefix = '_'.join([a.lower().replace(' ', '_').replace('=', '_') for a in [self.analysis_file_prefix, filename_prefixes[metric_name], method[0], method[1], x_axis_label, 'vs', y_axis_label] if a])
+                        self.create_scatterplot(os.path.join(self.output_directory, file_prefix), data_table_headers, data_table, 1, 2, plot_title, x_axis_label, y_axis_label)
+
+
+    def create_scatterplot(self, file_prefix, data_table_headers, data_table, x_series_index, y_series_index, plot_title = '', x_axis_label = '', y_axis_label = ''):
+
+        # Create the R script
+        boxplot_r_script = '''
+library(ggplot2)
+library(gridExtra)
+library(scales)
+library(qualV)
+
+# PDF
+pdf('%(file_prefix)s.pdf', paper="special", width=12, height=12) # otherwise postscript defaults to A4, rotated images
+txtalpha <- 0.8
+redtxtalpha <- 0.8
+
+%(pdf_plot_commands)s
+
+
+# PNG
+png('%(file_prefix)s.png', width=2560, height=2048, bg="white", res=600)
+txtalpha <- 0.8
+redtxtalpha <- 0.8
+
+%(png_plot_commands)s
+    '''
+
+        xy_table_file = file_prefix + '.txt'
+        write_file(file_prefix + '.txt', '\n'.join(','.join(map(str, line)) for line in [data_table_headers] + data_table))
+
+        single_plot_commands = '''
+# Set the margins
+par(mar=c(5, 5, 1, 1))
+
+xy_data <- read.csv('%(xy_table_file)s', header=T)
+
+names(xy_data)[%(x_series_index)d + 1] <- "xvalues"
+names(xy_data)[%(y_series_index)d + 1] <- "yvalues"
+
+# coefs contains two values: (Intercept) and yvalues
+coefs <- coef(lm(xvalues~yvalues, data = xy_data))
+fitcoefs = coef(lm(xvalues~0 + yvalues, data = xy_data))
+fitlmv_yvalues <- as.numeric(fitcoefs[1])
+lmv_intercept <- as.numeric(coefs[1])
+lmv_yvalues <- as.numeric(coefs[2])
+lm(xy_data$yvalues~xy_data$xvalues)
+
+xlabel <- "%(x_axis_label)s"
+ylabel <- "%(y_axis_label)s"
+plot_title <- "%(plot_title)s"
+rvalue <- cor(xy_data$yvalues, xy_data$xvalues)
+
+# Alphabetically, "Similar" < "X" < "Y" so the logic below works
+countsim <- paste("X ~ Y =", dim(subset(xy_data, Classification=="Similar"))[1])
+countX <- paste("X > Y =", dim(subset(xy_data, Classification=="X"))[1])
+countY <- paste("Y > X=", dim(subset(xy_data, Classification=="Y"))[1])
+
+p <- qplot(main="", xvalues, yvalues, data=xy_data, xlab=xlabel, ylab=ylabel, shape = I(18), alpha = I(txtalpha), col=factor(Classification)) +
+        scale_color_manual("Cases", labels = c(countsim, countX, countY), values = c("red","blue","green")) +
+        labs(title = "%(plot_title)s") +
+        theme(plot.title = element_text(color = "#555555", size=rel(0.75))) +
+        guides(col = guide_legend()) +
+        geom_abline(size = 0.25, intercept = lmv_intercept, slope = lmv_yvalues) +
+        geom_abline(color="blue",size = 0.25, intercept = 0, slope = fitlmv_yvalues)
+
+if ('%(plot_type)s' == 'pdf'){
+    p <- p + theme(axis.title.x = element_text(size=45, vjust=-1.5)) # vjust for spacing
+    p <- p + theme(axis.title.y = element_text(size=45))
+    p <- p + theme(axis.text.x=element_text(size=25))
+    p <- p + theme(axis.text.y=element_text(size=25))
+}
+
+# Create labels for cor(y,x)
+# Using hjust=0 in geom_text sets text to be left-aligned
+minx <- min(xy_data$xvalues)
+maxx <- max(xy_data$xvalues)
+miny <- min(xy_data$yvalues)
+maxy <- max(xy_data$yvalues)
+xpos <- minx + ((maxx - minx) * 0.05)
+ypos_cor <- maxy - ((maxy - miny) * 0.015)
+
+# Plot graph
+p <- p + geom_text(hjust=0, size=4, colour="black", aes(xpos, ypos_cor, fontface="plain", family = "sans", label=sprintf("R = %%0.2f", round(rvalue, digits = 4))))
+p
+
+dev.off()
+        '''
+
+        # Create the R script
+        plot_type = 'pdf'
+        pdf_plot_commands = single_plot_commands % locals()
+        plot_type = 'png'
+        png_plot_commands = single_plot_commands % locals()
+        boxplot_r_script = boxplot_r_script % locals()
+        r_script_filepath = os.path.join(self.output_directory, '{0}.R'.format(file_prefix))
+        write_file(r_script_filepath, boxplot_r_script)
+
+        # Run the R script
+        run_r_script(r_script_filepath, cwd = self.output_directory)
+
+
     def analyze_covariation_similarity(self, covariation_similarities, common_domains):
         '''This function creates a text file with the covariation similarities by benchmark and domain and runs R to
            generate boxplots of the covariation similarities.'''
@@ -629,10 +816,113 @@ class Analyzer(object):
         self.generic_analysis_function(sequence_recoveries, common_domains, 'sequence_recovery', 'Sequence recovery')
 
 
-    def analyze_sequence_entropy(self, average_entropies, common_domains):
+    def analyze_mean_sequence_entropy(self, average_entropies, common_domains):
         self.generic_analysis_function(average_entropies, common_domains, 'sequence_entropy', 'Sequence entropy')
 
 
+    def analyze_residue_sequence_entropy(self, residue_entropies, common_domains):
+        '''This function creates a text file with the metric data over the benchmarks and domains and runs R to
+           generate boxplots of the metric data. The mean of the metrics over each benchmark is computed and added to
+           the summary_stats dictionary.
+        '''
+        # todo: merge this function with generic_analysis_function
+
+        metric_data = residue_entropies
+        metric_column_name = 'sequence_entropy'
+        metric_column_title = 'Sequence entropy'
+
+        # Create the R data frame
+        data_frame_values = []
+        benchmark_ids = set()
+        method_ids = set()
+        domain_indices = set()
+        for benchmark_id, domain_values in sorted(metric_data.iteritems()):
+            benchmark_ids.add(benchmark_id)
+            for domain, metric_values in sorted(domain_values.iteritems()):
+                for natural_sequence_index, metric_value in sorted(metric_values.iteritems()):
+                    benchmark_details = self.benchmark_details[benchmark_id]
+                    if benchmark_details.get('title'):
+                        # If the user specifies a title, that should be used
+                        method = benchmark_details['title']
+                    else:
+                        method = benchmark_details['method']
+                        if benchmark_details.get('kT') != None:
+                            method += ', kT {0}'.format(benchmark_details.get('kT'))
+                    method_ids.add(method)
+                    domain_indices.add(domain + '_' + natural_sequence_index)
+                    data_frame_values.append((benchmark_details['benchmark'], method, domain, int(natural_sequence_index), metric_value))
+
+        benchmark_column = "','".join(d[0] for d in data_frame_values)
+        method_column = "','".join(d[1] for d in data_frame_values)
+        domain_column = "','".join(d[2] for d in data_frame_values)
+        natural_sequence_index_column = "','".join(d[3] for d in data_frame_values)
+        metric_data_column = ",".join(str(d[4]) for d in data_frame_values)
+
+        # Create the R script
+        boxplot_generation_commands = '''
+p <- ggplot(data = benchmark_data, aes(factor(method), {0}, fill=method))
+p <- p + stat_boxplot(geom ='errorbar', linetype="solid", width = 0.25, position = "dodge")
+p <- p + stat_boxplot(geom = "boxplot", linetype="solid", position = "dodge", width = 0.60, na.rm = TRUE) + xlab("Method") + ylab("{1}") + facet_grid(.~benchmark) + theme(legend.position="none")
+p
+'''.format(metric_column_name, metric_column_title)
+
+        analysis_file_prefix = self.analysis_file_prefix
+        boxplot_r_script = '''
+library(ggplot2)
+library(grid)
+
+'''
+        published_data_dataframe = None
+        if self.published_data_methods:
+            published_data_dataframe = get_data_frame(self.published_data_methods, metric_column_name, backrub_method_prefix = self.backrub_method_prefix, backrub_method_suffix = self.backrub_method_suffix)
+            if published_data_dataframe:
+                boxplot_r_script += published_data_dataframe
+            method_ids = method_ids.union(set(get_published_method_ids(self.published_data_methods, backrub_method_prefix = self.backrub_method_prefix, backrub_method_suffix = self.backrub_method_suffix)))
+            benchmark_ids.add('_plos_one_published_data')
+
+
+        boxplot_r_script += '''
+benchmark_data <- data.frame(benchmark=c('%(benchmark_column)s'),
+                             method=c('%(method_column)s'),
+                             domain=c('%(domain_column)s'),
+                             %(metric_column_name)s=c(%(metric_data_column)s))
+''' % locals()
+        if published_data_dataframe:
+            boxplot_r_script += '''benchmark_data <- rbind(plos_benchmark_data, benchmark_data)\n'''
+
+        # Create a PNG file with roughly 150 pixels per method boxplot
+        png_width = 150 * (len(method_ids) * len(benchmark_ids))
+
+        boxplot_r_script += '''
+pdf('%(analysis_file_prefix)s%(metric_column_name)s.pdf')
+%(boxplot_generation_commands)s
+dev.off()
+
+png('%(analysis_file_prefix)s%(metric_column_name)s.png',width=%(png_width)d)
+%(boxplot_generation_commands)s
+dev.off()
+''' % locals()
+
+        r_script_filepath = os.path.join(self.output_directory, '{0}{1}.R'.format(self.analysis_file_prefix, metric_column_name))
+        write_file(r_script_filepath, boxplot_r_script)
+
+        # Run the R script
+        run_r_script(r_script_filepath, cwd = self.output_directory)
+
+        # Create a readable tabular file with the raw data
+        metric_data_xy_file_lines = []
+        benchmark_ids = sorted(metric_data.keys())
+        metric_data_xy_file_lines.append('\t'.join(['Domain'] + benchmark_ids))
+        for domain in common_domains:
+            columns = [domain]
+            for benchmark_id in benchmark_ids:
+                columns.append(metric_data[benchmark_id][domain])
+            metric_data_xy_file_lines.append('\t'.join(map(str, columns)))
+        write_file(os.path.join(self.output_directory, '{0}{1}_xy.txt'.format(self.analysis_file_prefix, metric_column_name)), '\n'.join(metric_data_xy_file_lines))
+
+        # Compute the mean of the values per benchmark
+        for benchmark_id, metric_values in sorted(metric_data.iteritems()):
+            self.summary_stats[benchmark_id][metric_column_title] = numpy.median(metric_values.values())
 
 
     def generic_analysis_function(self, metric_data, common_domains, metric_column_name, metric_column_title):
