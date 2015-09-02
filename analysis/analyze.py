@@ -756,15 +756,27 @@ rvalue <- cor(xy_data$yvalues, xy_data$xvalues)
 # Alphabetically, "Similar" < "X" < "Y" so the logic below works
 countsim <- paste("X ~ Y =", dim(subset(xy_data, Classification=="Similar"))[1])
 countX <- paste("X > Y =", dim(subset(xy_data, Classification=="X"))[1])
-countY <- paste("Y > X=", dim(subset(xy_data, Classification=="Y"))[1])
+countY <- paste("Y > X =", dim(subset(xy_data, Classification=="Y"))[1])
+
+# Create labels for cor(y,x)
+# Using hjust=0 in geom_text sets text to be left-aligned
+minx <- 0.0
+maxx <- min(1.0, max(xy_data$xvalues) + 0.1)
+miny <- 0.0
+maxy <- min(1.0, max(xy_data$yvalues) + 0.1)
+maxx <- max(maxx, maxy)
+maxy <- maxx
+xpos <- maxx / 10.0
+ypos <- maxy - (maxy / 10.0)
 
 p <- qplot(main="", xvalues, yvalues, data=xy_data, xlab=xlabel, ylab=ylabel, shape = I(18), alpha = I(txtalpha), col=factor(Classification)) +
         scale_color_manual("Cases", labels = c(countsim, countX, countY), values = c("red","blue","green")) +
         labs(title = "%(plot_title)s") +
         theme(plot.title = element_text(color = "#555555", size=rel(0.75))) +
         guides(col = guide_legend()) +
-        geom_abline(size = 0.25, intercept = lmv_intercept, slope = lmv_yvalues) +
-        geom_abline(color="blue",size = 0.25, intercept = 0, slope = fitlmv_yvalues)
+        geom_abline(size = 0.125, color="orange", intercept = lmv_intercept, slope = lmv_yvalues, alpha=0.2) +
+        geom_abline(slope=1, intercept=0, linetype=3, size=0.25, alpha=0.4) + # add a diagonal (dotted)
+        coord_cartesian(xlim = c(0.0, maxx), ylim = c(0.0, maxy)) # set the graph limits
 
 if ('%(plot_type)s' == 'pdf'){
     p <- p + theme(axis.title.x = element_text(size=45, vjust=-1.5)) # vjust for spacing
@@ -773,17 +785,9 @@ if ('%(plot_type)s' == 'pdf'){
     p <- p + theme(axis.text.y=element_text(size=25))
 }
 
-# Create labels for cor(y,x)
-# Using hjust=0 in geom_text sets text to be left-aligned
-minx <- min(xy_data$xvalues)
-maxx <- max(xy_data$xvalues)
-miny <- min(xy_data$yvalues)
-maxy <- max(xy_data$yvalues)
-xpos <- minx + ((maxx - minx) * 0.05)
-ypos_cor <- maxy - ((maxy - miny) * 0.015)
 
 # Plot graph
-p <- p + geom_text(hjust=0, size=4, colour="black", aes(xpos, ypos_cor, fontface="plain", family = "sans", label=sprintf("R = %%0.2f", round(rvalue, digits = 4))))
+p <- p + geom_text(hjust=0, size=4, colour="black", aes(xpos, ypos, fontface="plain", family = "sans", label=sprintf("R = %%0.2f", round(rvalue, digits = 4))))
 p
 
 dev.off()
@@ -800,7 +804,7 @@ dev.off()
 
         # Run the R script
         run_r_script(r_script_filepath, cwd = self.output_directory)
-
+        sys.exit(0)
 
     def analyze_covariation_similarity(self, covariation_similarities, common_domains):
         '''This function creates a text file with the covariation similarities by benchmark and domain and runs R to
