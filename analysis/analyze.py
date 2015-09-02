@@ -611,13 +611,14 @@ class Analyzer(object):
 
         colortext.message('Creating analysis plots in {0}.'.format(self.output_directory))
         self.cross_analyze_methods_and_benchmarks(covariation_similarities, profile_similarities, sequence_recoveries, common_domains)
-        sys.exit(0)
         #self.analyze_residue_sequence_entropy(residue_entropies, common_domains)
         self.analyze_covariation_similarity(covariation_similarities, common_domains)
         self.analyze_profile_similarity(profile_similarities, common_domains)
         self.analyze_sequence_recovery(sequence_recoveries, common_domains)
         self.analyze_mean_sequence_entropy(average_entropies, common_domains)
 
+        # File clean-up: move the R files and txt files into a subdirectory - it is likely that they will not be used
+        self.cleanup_output_directory()
 
         # Compute the best and worst values for each metric. In all of the metrics, it happens that larger values indicate
         # an improvement.
@@ -646,15 +647,32 @@ class Analyzer(object):
         print('')
 
 
+    def cleanup_output_directory(self):
+        '''Move the R files and txt files into a subdirectory of the output directory.'''
+        rawdata_dir = os.path.join(self.output_directory, 'rawdata')
+        try:
+            os.mkdir(rawdata_dir)
+        except: pass
+        for f in glob.glob(os.path.join(self.output_directory, '*.R')):
+            try:
+                print(f)
+                print(os.path.join(rawdata_dir, os.path.split(f)[1]))
+                shutil.move(f, os.path.join(rawdata_dir, os.path.split(f)[1]))
+            except: pass
+        for f in glob.glob(os.path.join(self.output_directory, '*.txt')):
+            try:
+                print(f)
+                print(os.path.join(rawdata_dir, os.path.split(f)[1]))
+                shutil.move(f, os.path.join(rawdata_dir, os.path.split(f)[1]))
+            except: pass
+
+
     def get_scatterplot_title_(self, benchmark_id):
         details = self.benchmark_details[benchmark_id]
         if details.get('kT'):
             method_details = 'kT={0}'.format(str(details.get('kT', '')))
         else:
             method_details = str(details.get('kT', ''))
-        #    title = '%(benchmark)s, %(method)s kT=%(kT)s' % details
-        #else:
-        #    title = '%(benchmark)s, %(method)s' % details
         title = details['benchmark']
         return title, (details['method'], method_details)
 
@@ -717,9 +735,13 @@ class Analyzer(object):
         # Use colors spaced around the HSV wheel for the remaining benchmarks
         rgbcolors = color_wheel(len(all_benchmark_ids), start = 15, saturation_adjustment = None)
         for x in range(len(all_benchmark_ids)):
-            series_colors[all_benchmark_ids[x]] = rgbcolors[x]
+            series_colors[all_benchmark_ids[x]] = '#' + rgbcolors[x]
         # Override any colors with those specified in the command line, if any
         series_colors.update(self.series_colors)
+
+        # Create a subdirectory to hold the individual plots
+        if not os.path.exists(os.path.join(self.output_directory, 'scatterplots')):
+            os.mkdir(os.path.join(self.output_directory, 'scatterplots'))
 
         # For all comparable sets (same method, same metric), create a scatterplot of the values
         for method, method_data in data_by_method.iteritems():
@@ -753,14 +775,14 @@ class Analyzer(object):
                                 classification = 'Y'
                             data_table.append((domain, benchmark_values[benchmark_id_1][domain], benchmark_values[benchmark_id_2][domain], classification))
                         file_prefix = '_'.join([a.lower().replace(' ', '_').replace('=', '_') for a in [self.analysis_file_prefix, filename_prefixes[metric_name], method[0], method[1], x_axis_label, 'vs', y_axis_label] if a])
-                        self.create_scatterplot(os.path.join(self.output_directory, file_prefix), data_table_headers, data_table, 1, 2, x_color, y_color, plot_title, x_axis_label, y_axis_label)
+                        self.create_scatterplot(os.path.join(self.output_directory, 'scatterplots', file_prefix), data_table_headers, data_table, 1, 2, x_color, y_color, plot_title, x_axis_label, y_axis_label)
 
         # Combine the plots into a PDF file
         colortext.message('Creating a PDF containing all of the scatterplots.')
         try:
             if os.path.exists(os.path.join(self.output_directory, 'benchmark_vs_benchmark_scatterplots.pdf')):
                 os.remove(os.path.join(self.output_directory, 'benchmark_vs_benchmark_scatterplots.pdf'))
-            p = subprocess.Popen(shlex.split('convert *.png benchmark_vs_benchmark_scatterplots.pdf'), cwd = self.output_directory)
+            p = subprocess.Popen(shlex.split('convert {0} benchmark_vs_benchmark_scatterplots.pdf'.format(os.path.join('scatterplots', '*.png'))), cwd = self.output_directory)
             stdoutdata, stderrdata = p.communicate()
             if p.returncode != 0: raise Exception('')
         except:
@@ -776,15 +798,7 @@ library(gridExtra)
 library(scales)
 library(qualV)
 
-# PDF
-pdf('%(file_prefix)s.pdf', paper="special", width=12, height=12) # otherwise postscript defaults to A4, rotated images
-txtalpha <- 0.8
-redtxtalpha <- 0.8
-
-%(pdf_plot_commands)s
-
-
-# PNG
+# PNG generation
 png('%(file_prefix)s.png', width=2560, height=2048, bg="white", res=600)
 txtalpha <- 0.8
 redtxtalpha <- 0.8
@@ -822,8 +836,7 @@ countsim <- paste("X ~ Y =", dim(subset(xy_data, Classification=="Similar"))[1])
 countX <- paste("X > Y =", dim(subset(xy_data, Classification=="X"))[1])
 countY <- paste("Y > X =", dim(subset(xy_data, Classification=="Y"))[1])
 
-# Create labels for cor(y,x)
-# Using hjust=0 in geom_text sets text to be left-aligned
+# Set graph limits and the position for the correlation value
 minx <- 0.0
 maxx <- min(1.0, max(xy_data$xvalues) + 0.1)
 miny <- 0.0
@@ -846,26 +859,16 @@ p <- qplot(main="", xvalues, yvalues, data=xy_data, xlab=xlabel, ylab=ylabel, sh
         geom_abline(size = 0.125, color="orange", intercept = lmv_intercept, slope = lmv_yvalues, alpha=0.2) +
         geom_abline(slope=1, intercept=0, linetype=3, size=0.25, alpha=0.4) + # add a diagonal (dotted)
         coord_cartesian(xlim = c(0.0, maxx), ylim = c(0.0, maxy)) + # set the graph limits
-        geom_text(size=1.5, color="#000000", alpha=0.4, data=subset(xy_data, yvalues - xvalues > 0.15), aes(xvalues, yvalues+0.015, label=Domain)) # label outliers
-
-if ('%(plot_type)s' == 'pdf'){
-    p <- p + theme(axis.title.x = element_text(size=45, vjust=-1.5)) # vjust for spacing
-    p <- p + theme(axis.title.y = element_text(size=45))
-    p <- p + theme(axis.text.x=element_text(size=25))
-    p <- p + theme(axis.text.y=element_text(size=25))
-}
-
+        geom_text(size=1.5, color="#000000", alpha=0.4, data=subset(xy_data, yvalues - xvalues > 0.15), aes(xvalues, yvalues+0.015, label=Domain)) + # label outliers
+        geom_text(hjust=0, size=4, colour="black", aes(xpos, ypos, fontface="plain", family = "sans", label=sprintf("R = %%0.2f", round(rvalue, digits = 4)))) # add correlation text; hjust=0 sets left-alignment
 
 # Plot graph
-p <- p + geom_text(hjust=0, size=4, colour="black", aes(xpos, ypos, fontface="plain", family = "sans", label=sprintf("R = %%0.2f", round(rvalue, digits = 4))))
 p
 
 dev.off()
         '''
 
         # Create the R script
-        plot_type = 'pdf'
-        pdf_plot_commands = single_plot_commands % locals()
         plot_type = 'png'
         png_plot_commands = single_plot_commands % locals()
         boxplot_r_script = boxplot_r_script % locals()
@@ -873,7 +876,7 @@ dev.off()
         write_file(r_script_filepath, boxplot_r_script)
 
         # Run the R script
-        run_r_script(r_script_filepath, cwd = self.output_directory)
+        run_r_script(r_script_filepath, cwd = os.path.join(self.output_directory, 'scatterplots'))
 
 
     def analyze_covariation_similarity(self, covariation_similarities, common_domains):
@@ -964,15 +967,8 @@ benchmark_data <- data.frame(benchmark=c('%(benchmark_column)s'),
         if published_data_dataframe:
             boxplot_r_script += '''benchmark_data <- rbind(plos_benchmark_data, benchmark_data)\n'''
 
-        # Create a PNG file with roughly 150 pixels per method boxplot
-        png_width = 150 * (len(method_ids) * len(benchmark_ids))
-
         boxplot_r_script += '''
 pdf('%(analysis_file_prefix)s%(metric_column_name)s.pdf')
-%(boxplot_generation_commands)s
-dev.off()
-
-png('%(analysis_file_prefix)s%(metric_column_name)s.png',width=%(png_width)d)
 %(boxplot_generation_commands)s
 dev.off()
 ''' % locals()
@@ -1060,15 +1056,8 @@ benchmark_data <- data.frame(benchmark=c('%(benchmark_column)s'),
         if published_data_dataframe:
             boxplot_r_script += '''benchmark_data <- rbind(plos_benchmark_data, benchmark_data)\n'''
 
-        # Create a PNG file with roughly 150 pixels per method boxplot
-        png_width = 150 * (len(method_ids) * len(benchmark_ids))
-
         boxplot_r_script += '''
 pdf('%(analysis_file_prefix)s%(metric_column_name)s.pdf')
-%(boxplot_generation_commands)s
-dev.off()
-
-png('%(analysis_file_prefix)s%(metric_column_name)s.png',width=%(png_width)d)
 %(boxplot_generation_commands)s
 dev.off()
 ''' % locals()
