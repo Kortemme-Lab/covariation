@@ -69,9 +69,15 @@ Options:
     --published_data_backrub_method_suffix SUFFIX
         See the published_data_backrub_method_prefix option above.
 
+    --scatterplot_colors COLORS_FILE
+        Specifies a JSON file to be used to color the scatterplot series. The keys are names of benchmarks i.e. the top-level keys in the benchmarks.json files.
+        If you specify a file that does not yet exist, one will be created for you to edit. The colors should be in a format R can understand e.g. hex triplets
+        (#ff0000) specifying red, green, and blue values or predefined colors e.g. "orange", "blue".
+
+
 Authors:
-    Noah Ollikainen: Analysis scripts
-    Shane O'Connor: This script and modifications to the analysis scripts
+    Noah Ollikainen: Original mathematical functions used in analysis
+    Shane O'Connor: This script and modifications to the analysis functions
 """
 
 import collections
@@ -80,7 +86,8 @@ import math
 import numpy
 import shutil
 import time
-
+import shlex
+import subprocess
 import traceback
 import copy
 import os
@@ -95,7 +102,7 @@ from libraries import colortext
 from utils.fsio import read_file, write_file, get_file_lines
 from utils.pdb import PDB
 from utils.get_mi import create_mi_file, SequenceMatrix
-from utils.rplot import run_r_script
+from utils.rplot import run_r_script, color_wheel
 from covariation_similarity.covariation_similarity import compute_overlap
 from profile_similarity.profile_similarity import get_covarying_pairs, get_rosetta_sequence, get_natural_sequences, background
 from published_data.published_data import get_data_frame, get_median_metric_data
@@ -107,7 +114,7 @@ canonical_aas = set(['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N',
 class Analyzer(object):
 
 
-    def __init__(self, input_jsons, benchmark_ids, output_directory, overwrite_files, expectn, published_data_methods = [], backrub_method_prefix = '', backrub_method_suffix = '', analysis_file_prefix = ''):
+    def __init__(self, input_jsons, benchmark_ids, output_directory, overwrite_files, expectn, published_data_methods = [], backrub_method_prefix = '', backrub_method_suffix = '', analysis_file_prefix = '', scatterplot_colors_file = None):
 
         # Set up the object
         self.output_directory = os.path.abspath(output_directory)
@@ -122,13 +129,14 @@ class Analyzer(object):
         self.published_data_methods = published_data_methods
         self.backrub_method_prefix = backrub_method_prefix
         self.backrub_method_suffix = backrub_method_suffix
+        self.series_colors = {}
 
         if not os.path.exists(self.output_directory):
             try:
                 os.makedirs(self.output_directory)
             except: pass
             if not os.path.exists(self.output_directory):
-                raise Exception('An exception occurred creating the output directory {0}.'.format(output_directory)) 
+                raise Exception('An exception occurred creating the output directory {0}.'.format(output_directory))
 
         # Read in the domain and native sequence data
         self.get_domain_sequences(read_file('domain_sequences.txt'))
@@ -147,6 +155,10 @@ class Analyzer(object):
                 raise Exception('The benchmark ids were not found in the JSON files.')
             else:
                 raise Exception('No benchmark ids were found in the JSON files.')
+
+        # Read in the custom colors
+        if scatterplot_colors_file:
+            self.read_colors(scatterplot_colors_file)
 
 
     @staticmethod
@@ -217,6 +229,26 @@ class Analyzer(object):
 
 
     # Setup scripts
+
+
+    def read_colors(self, scatterplot_colors_file):
+        '''Read the scatterplot color scheme or create a new one.'''
+        if not os.path.exists(scatterplot_colors_file):
+            colortext.error('The series colors file {0} does not exist so one is being created with the default colors. Edit the color scheme and rerun this command.'.format(scatterplot_colors_file))
+            series_colors = {}
+            all_benchmark_ids = sorted(set([v['benchmark'] for k, v in self.benchmark_details.iteritems()]))
+            rgbcolors = color_wheel(len(all_benchmark_ids), start = 15, saturation_adjustment = None)
+            for x in range(len(all_benchmark_ids)):
+                series_colors[all_benchmark_ids[x]] = '#' + rgbcolors[x]
+            write_file(scatterplot_colors_file, json.dumps(series_colors, sort_keys=True, indent=4))
+            sys.exit(1)
+        else:
+            try:
+                self.series_colors = json.loads(read_file(scatterplot_colors_file))
+            except:
+                colortext.error('The file {0} could not be parsed correctly as a JSON file.'.format(scatterplot_colors_file))
+                sys.exit(1)
+
 
     def determine_positions_for_entropy_calculation(self):
         '''Computes the natural sequence entropy for the natural domains.'''
@@ -671,6 +703,25 @@ class Analyzer(object):
                 data_by_method[method][benchmark_metric[0]][title] = benchmark_metric[1][benchmark_id]
 
         # For all comparable sets (same method, same metric), create a scatterplot of the values
+        all_benchmark_ids = set()
+        for method, method_data in data_by_method.iteritems():
+            for metric_name, benchmark_values in method_data.iteritems():
+                all_benchmark_ids = all_benchmark_ids.union(set(benchmark_values.keys()))
+        all_benchmark_ids.remove('Published (score12)')
+        all_benchmark_ids = sorted(all_benchmark_ids)
+
+        # Use a fixed color for the published data (this can be overridden with colors.json)
+        series_colors = {
+            'Published (score12)' : '#008B8B',
+        }
+        # Use colors spaced around the HSV wheel for the remaining benchmarks
+        rgbcolors = color_wheel(len(all_benchmark_ids), start = 15, saturation_adjustment = None)
+        for x in range(len(all_benchmark_ids)):
+            series_colors[all_benchmark_ids[x]] = rgbcolors[x]
+        # Override any colors with those specified in the command line, if any
+        series_colors.update(self.series_colors)
+
+        # For all comparable sets (same method, same metric), create a scatterplot of the values
         for method, method_data in data_by_method.iteritems():
             # method e.g. = ('Fixed', '')
             for metric_name, benchmark_values in method_data.iteritems():
@@ -681,6 +732,8 @@ class Analyzer(object):
                     for y in range(x + 1, len(benchmark_ids)):
                         benchmark_id_1 = benchmark_ids[x]
                         benchmark_id_2 = benchmark_ids[y]
+                        x_color = series_colors[benchmark_id_1]
+                        y_color = series_colors[benchmark_id_2]
 
                         # Get the list of domains common to both runs
                         xy_keys = sorted(set(benchmark_values[benchmark_id_1].keys()).intersection(set(benchmark_values[benchmark_id_2].keys())))
@@ -700,10 +753,21 @@ class Analyzer(object):
                                 classification = 'Y'
                             data_table.append((domain, benchmark_values[benchmark_id_1][domain], benchmark_values[benchmark_id_2][domain], classification))
                         file_prefix = '_'.join([a.lower().replace(' ', '_').replace('=', '_') for a in [self.analysis_file_prefix, filename_prefixes[metric_name], method[0], method[1], x_axis_label, 'vs', y_axis_label] if a])
-                        self.create_scatterplot(os.path.join(self.output_directory, file_prefix), data_table_headers, data_table, 1, 2, plot_title, x_axis_label, y_axis_label)
+                        self.create_scatterplot(os.path.join(self.output_directory, file_prefix), data_table_headers, data_table, 1, 2, x_color, y_color, plot_title, x_axis_label, y_axis_label)
+
+        # Combine the plots into a PDF file
+        colortext.message('Creating a PDF containing all of the scatterplots.')
+        try:
+            if os.path.exists(os.path.join(self.output_directory, 'benchmark_vs_benchmark_scatterplots.pdf')):
+                os.remove(os.path.join(self.output_directory, 'benchmark_vs_benchmark_scatterplots.pdf'))
+            p = subprocess.Popen(shlex.split('convert *.png benchmark_vs_benchmark_scatterplots.pdf'), cwd = self.output_directory)
+            stdoutdata, stderrdata = p.communicate()
+            if p.returncode != 0: raise Exception('')
+        except:
+            colortext.error('An error occurred while combining the scatterplots using the convert application (ImageMagick).')
 
 
-    def create_scatterplot(self, file_prefix, data_table_headers, data_table, x_series_index, y_series_index, plot_title = '', x_axis_label = '', y_axis_label = ''):
+    def create_scatterplot(self, file_prefix, data_table_headers, data_table, x_series_index, y_series_index, x_color, y_color, plot_title = '', x_axis_label = '', y_axis_label = ''):
 
         # Create the R script
         boxplot_r_script = '''
@@ -769,14 +833,20 @@ maxy <- maxx
 xpos <- maxx / 10.0
 ypos <- maxy - (maxy / 10.0)
 
+plot_scale <- scale_color_manual(
+    "Counts",
+    values = c( "Similar" = '#444444', "X" = '%(x_color)s', "Y" ='%(y_color)s'),
+    labels = c(  "Similar" = countsim, "X" = countX, "Y" = countY) )
+
 p <- qplot(main="", xvalues, yvalues, data=xy_data, xlab=xlabel, ylab=ylabel, shape = I(18), alpha = I(txtalpha), col=factor(Classification)) +
-        scale_color_manual("Cases", labels = c(countsim, countX, countY), values = c("red","blue","green")) +
+        plot_scale +
         labs(title = "%(plot_title)s") +
         theme(plot.title = element_text(color = "#555555", size=rel(0.75))) +
         guides(col = guide_legend()) +
         geom_abline(size = 0.125, color="orange", intercept = lmv_intercept, slope = lmv_yvalues, alpha=0.2) +
         geom_abline(slope=1, intercept=0, linetype=3, size=0.25, alpha=0.4) + # add a diagonal (dotted)
-        coord_cartesian(xlim = c(0.0, maxx), ylim = c(0.0, maxy)) # set the graph limits
+        coord_cartesian(xlim = c(0.0, maxx), ylim = c(0.0, maxy)) + # set the graph limits
+        geom_text(size=1.5, color="#000000", alpha=0.4, data=subset(xy_data, yvalues - xvalues > 0.15), aes(xvalues, yvalues+0.015, label=Domain)) # label outliers
 
 if ('%(plot_type)s' == 'pdf'){
     p <- p + theme(axis.title.x = element_text(size=45, vjust=-1.5)) # vjust for spacing
@@ -804,7 +874,7 @@ dev.off()
 
         # Run the R script
         run_r_script(r_script_filepath, cwd = self.output_directory)
-        sys.exit(0)
+
 
     def analyze_covariation_similarity(self, covariation_similarities, common_domains):
         '''This function creates a text file with the covariation similarities by benchmark and domain and runs R to
@@ -1051,6 +1121,7 @@ if __name__ == '__main__':
                  analysis_file_prefix = analysis_file_prefix,
                  published_data_methods = arguments['--include_published_data'],
                  backrub_method_prefix = arguments.get('--published_data_backrub_method_prefix') or '',
-                 backrub_method_suffix = arguments.get('--published_data_backrub_method_suffix') or '').run()
+                 backrub_method_suffix = arguments.get('--published_data_backrub_method_suffix') or '',
+                 scatterplot_colors_file = arguments.get('--scatterplot_colors')).run()
     except KeyboardInterrupt:
         print
