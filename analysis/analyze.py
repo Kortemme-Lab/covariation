@@ -264,11 +264,39 @@ class Analyzer(object):
                 assert(len(ts) == 2)
                 expected_positions.append((ts[0], int(ts[1])))
 
+        entropy_levels_by_position = {}
         published_natural_entropies = {}
+        _natural_entropies = []
         for l in sorted(get_file_lines(os.path.join('published_data', 'sequence_entropy_backrub.txt'))[1:]):
             if l.strip() and l.startswith('PF'):
                 ts = l.split('\t')
-                published_natural_entropies[(ts[0], int(ts[1]))] = float(ts[2])
+                natural_entropy = float(ts[2])
+                position_ = int(ts[1])
+                published_natural_entropies[(ts[0], position_)] = natural_entropy
+                _natural_entropies.append((natural_entropy, ts[0], position_))
+
+        # Partition the set of all positions in all domains into three parts of roughly equal size
+        _natural_entropies = sorted(_natural_entropies)
+        first_cut = len(_natural_entropies) / 3
+        second_cut = (2 * len(_natural_entropies)) / 3
+        while _natural_entropies[first_cut] == _natural_entropies[first_cut + 1]:
+            first_cut += 1
+        while _natural_entropies[second_cut] == _natural_entropies[second_cut + 1]:
+            second_cut += 1
+        for x in _natural_entropies[:first_cut]:
+            entropy_levels_by_position[(x[1], x[2])] = 'low'
+        for x in _natural_entropies[first_cut:second_cut]:
+            entropy_levels_by_position[(x[1], x[2])] = 'medium'
+        for x in _natural_entropies[second_cut:]:
+            entropy_levels_by_position[(x[1], x[2])] = 'high'
+        self.entropy_levels_by_position = entropy_levels_by_position
+
+        # Remember the cut-offs used for the three classes to be used in plots later
+        self.entropy_levels_ranges = dict(
+            low = (_natural_entropies[0][0], _natural_entropies[first_cut - 1][0]),
+            medium = (_natural_entropies[first_cut][0], _natural_entropies[second_cut - 1][0]),
+            high = (_natural_entropies[second_cut][0], _natural_entropies[-1][0]),
+        )
 
         colortext.wgreen('\nUnit-testing sequence entropy calculator: ')
         try:
@@ -609,6 +637,8 @@ class Analyzer(object):
             raise Exception('There were no domains common to the specified benchmark runs.')
         common_domains = sorted(common_domains)
 
+        #cross_analyze_methods_and_benchmarks_by_position
+
         colortext.message('Creating analysis plots in {0}.'.format(self.output_directory))
         self.cross_analyze_methods_and_benchmarks(covariation_similarities, profile_similarities, sequence_recoveries, common_domains)
         #self.analyze_residue_sequence_entropy(residue_entropies, common_domains)
@@ -676,6 +706,12 @@ class Analyzer(object):
         title = details['benchmark']
         return title, (details['method'], method_details)
 
+
+    def cross_analyze_methods_and_benchmarks_by_position(self, covariation_similarities, profile_similarities, sequence_recoveries, common_domains):
+        '''Create scatterplots comparing the same metrics across different benchmark runs.'''
+
+        raise Exception('to be implemented') #todo
+        
 
     def cross_analyze_methods_and_benchmarks(self, covariation_similarities, profile_similarities, sequence_recoveries, common_domains):
         '''Create scatterplots comparing the same metrics across different benchmark runs.'''
