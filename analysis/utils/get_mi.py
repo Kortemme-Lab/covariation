@@ -116,27 +116,56 @@ class SequenceMatrix(object):
 
 
 def get_MI(length, entropies, joint_entropies):
+    '''length is the number of positions in the sequences.
+       entropies is mapping from positions i to the Shannon entropy of the positions (H_i in the paper)
+       joint_entropies is a mapping from pairs of positions i, j where i < j to their joint_entropy.  (H_i,j in the paper)
+    '''
+
+    assert(len(entropies) == length)
 
     MI = {}
     MI_sums = {}
     MI_means = {}
-    MI_sums_correct = {}
     for i in range(0, length):
         MI_sums[i] = 0
-        MI_sums_correct[i] = 0
     sum_MI = 0
 
     for i in range(0, length):
         for j in range(i+1, length):
             ij = str(i)+" "+str(j)
-            MI[ij] = (entropies[i] + entropies[j] - joint_entropies[ij])
+            MI[ij] = (entropies[i] + entropies[j] - joint_entropies[ij]) # This computes MI_i,j as described in the paper
             MI_sums[i] += MI[ij]
             MI_sums[j] += MI[ij]
             sum_MI += MI[ij]
 
+    # Compute \bar{MI}, the mean MI over all pairs of positions
     mean_MI = sum_MI / float(len(MI))
-    #print mean_MI
 
+    # Compute \bar{MI_i}, the mean MI of position i with all other positions
+    for i in range(0, length):
+        MI_means[i] = MI_sums[i] / float(length - 1)
+
+    # Compute corrected_MI = MIp_i,j for all i and j and \bar{MIp}, the average MIp over all pairs i and j
+    sum_corrected_MI = 0
+    APC = {}
+    corrected_MI = {}
+    for ij in MI:
+        i = int(ij.split()[0])
+        j = int(ij.split()[1])
+        APC[ij] = (MI_means[i] * MI_means[j]) / mean_MI
+        corrected_MI[ij] = MI[ij] - (MI_means[i] * MI_means[j]) / mean_MI # this computes MIp_i,j, the product corrected mutual information
+        sum_corrected_MI += corrected_MI[ij]
+    mean_corrected_MI = sum_corrected_MI / float(len(MI)) # this computes the average MIp over all pairs i and j, \bar{MIp}
+
+    # Compute the standard deviation of MIp
+    sum_corrected_MI = 0
+    for ij in corrected_MI:
+        sum_corrected_MI += (corrected_MI[ij] - mean_corrected_MI)**2
+    stddev_corrected_MI = math.sqrt(sum_corrected_MI / float(len(MI)))
+
+    # todo: resume commenting from here
+
+    # Compute Z_i,j
     std_sum = 0
     for ij in MI:
         std_sum += (MI[ij] - mean_MI)**2
@@ -145,31 +174,12 @@ def get_MI(length, entropies, joint_entropies):
     for ij in MI:
         Z[ij] = (MI[ij] - mean_MI) / std_MI
 
-    for i in range(0, length):
-        MI_means[i] = MI_sums[i] / float(length - 1)
-
-    sum_corrected_MI = 0
-    APC = {}
-    corrected_MI = {}
-
-    for ij in MI:
-        i = int(ij.split()[0])
-        j = int(ij.split()[1])
-        APC[ij] = (MI_means[i] * MI_means[j]) / mean_MI
-        corrected_MI[ij] = MI[ij] - (MI_means[i] * MI_means[j]) / mean_MI
-        sum_corrected_MI += corrected_MI[ij]
-    mean_corrected_MI = sum_corrected_MI / float(len(MI))
-    sum_corrected_MI = 0
-
-    for ij in corrected_MI:
-        sum_corrected_MI += (corrected_MI[ij] - mean_corrected_MI)**2
-
-    stddev_corrected_MI = math.sqrt(sum_corrected_MI / float(len(MI)))
 
     Zp = {}
     for ij in corrected_MI:
         Zp[ij] = (corrected_MI[ij] - mean_corrected_MI) / stddev_corrected_MI
 
+    # Compute mean_corrected_MI_i = \bar{MIp_i}, the mean of MIp_i,j where j ranges over all positions where i != j
     mean_corrected_MI_i = {}
     for i in range(0, length):
         xsum = float(0.0)
@@ -208,6 +218,7 @@ def get_MI(length, entropies, joint_entropies):
         i = int(ij.split()[0])
         j = int(ij.split()[1])
         if stddev_corrected_MI_i[i] > 0 and stddev_corrected_MI_i[j] > 0:
+            # corrected_MI[ij] is MIp_i,j
             Zpx[ij] = ((corrected_MI[ij] - mean_corrected_MI_i[i]) / stddev_corrected_MI_i[i]) * ((corrected_MI[ij] - mean_corrected_MI_i[j]) / stddev_corrected_MI_i[j])
         else:
             Zpx[ij] = 0
@@ -310,10 +321,11 @@ def compute_mi(pfam_indices, fasta_file_contents, expectn = None, domain = None)
         raise Exception('Expected {0} records in but read {2}.'.format(expectn, len(sequences)))
 
     # This is the calculation of mutual information
+
+    # Compute the Shannon entropy at each position
     entropies = {}
     counts = {}
     frequencies = {}
-
     for i in range(0, length):
         counts[i] = single.copy()
         for seq in sequences:
@@ -327,8 +339,10 @@ def compute_mi(pfam_indices, fasta_file_contents, expectn = None, domain = None)
                 xsum += -1 * freq * math.log(freq,20)
         entropies[i] = xsum
 
+    # The joint entropy calculated at all unique pairs of distinct positions
+    # If there are n positions then there will be ((n - 1) + (n - 2) + ... + (n - n)) pairs of positions
+    # The keys of joint_entropies are internally sorted i.e. the first word (sequence index) in the key will always be lower than the second word
     joint_entropies = {}
-
     for i in range(0, length):
         for j in range(i+1, length):
             joint_counts = pair.copy()
@@ -336,13 +350,16 @@ def compute_mi(pfam_indices, fasta_file_contents, expectn = None, domain = None)
             for seq in sequences:
                 joint_counts[seq[i]+seq[j]] += 1
             sum_joint_entropy = 0
-            for char in joint_counts:
-                freq = float(joint_counts[char]) / num_sequences
+            for char_pair in joint_counts:
+                freq = float(joint_counts[char_pair]) / num_sequences
                 if freq > 0:
                     sum_joint_entropy += -1 * freq * math.log(freq,20)
             joint_entropies[ab] = sum_joint_entropy
 
+    # Z has an entry for each pair in joint_entropies (each unique pair of distinct positions) and is a mapping
+    #    'i j' -> float where i and j are positions in the sequence and i < j
     MI, Z, Zp, Zpx = get_MI(length, entropies, joint_entropies)
+    assert(sorted(joint_entropies) == sorted(Z.keys()) == sorted(Zp.keys()) == sorted(Zpx.keys()))
 
     s = []
     for a,b in sorted(Z.items(), key = operator.itemgetter(1), reverse = False):
