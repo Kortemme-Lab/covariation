@@ -33,7 +33,7 @@ methods = dict(
         uses_temperature = True,
         file_filter = "([0-9A-Za-z]{4})_([0-9A-Za-z]{1})_%(temperature)s_\\d+_0001_last_0001.pdb",
     ),
-    fixbb = dict(
+    Fixed = dict(
         method_type = 'Fixed backbone',
         args = dict(
             fixbb_step   = '"%(fixbb_executable)s -database %(rosetta_database_path)s -s %(input_pdb)s.pdb -resfile %(ALLAA_resfile)s -ex1 -ex2 -extrachi_cutoff 0 -nstruct 1 -overwrite -linmem_ig 10 -no_his_his_pairE -minimize_sidechains -out::suffix _" + str(sge_task_id) + " %(extra_flags)s"',

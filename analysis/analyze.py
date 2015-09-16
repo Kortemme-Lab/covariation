@@ -125,8 +125,14 @@ class Analyzer(object):
         self.valid_positions = {} # a mapping from Pfam domain to residue positions which never contain gaps or non-canonicals in the native sequences
         self.natural_domain_entropies = {} # the entropies of valid positions in the natural domains
         self.native_sequence_matrices = {} # a mapping from Pfam domain to SequenceMatrix objects
+        self.entropy_levels_by_position = {} # a mapping from pairs (domain, position) to 'low', 'medium', or 'high' indicating the relative level of entropy at that position
+        self.entropy_levels_ranges = {} # the definition of the ranges of entropy for the three classes (low, medium, and high)
         self.analysis_file_prefix = analysis_file_prefix
-        self.published_data_methods = published_data_methods
+        if 'All' in published_data_methods:
+            self.published_data_methods = ['Fixed', '0.3', '0.6', '0.9', '1.2', '1.8', '2.4']
+        else:
+            self.published_data_methods = published_data_methods
+
         self.backrub_method_prefix = backrub_method_prefix
         self.backrub_method_suffix = backrub_method_suffix
         self.series_colors = {}
@@ -400,7 +406,8 @@ class Analyzer(object):
         fasta_records = []
         c = 0
         tc = 0
-        input_files = [os.path.abspath(os.path.join(input_directory, f)) for f in sorted(os.listdir(input_directory)) if re.match(file_filter, f)]
+        input_files = [os.path.abspath(os.path.join(input_directory, f)) for f in sorted(os.listdir(input_directory)) if re.match(file_filter, f)] # since we cut off at expectn, sorting the files is important for reliability
+        input_files = input_files[:expectn]
         progress_step = (len(input_files)/(20.0))
         if input_files:
             print('[' + ('=' * 6) + 'Progress' + ('=' * 6) + ']')
@@ -444,7 +451,7 @@ class Analyzer(object):
         return overlap
 
 
-    def compute_profile_similarity(self, domain, mutual_information_filepath, fasta_file):
+    def compute_profile_similarity(self, domain, mutual_information_filepath, fasta_file, profile_similarities_by_position):
         '''Computes the profile similarity for a domain based on the mutual information and FASTA file.'''
 
         struct = self.domain_sequences[domain]
@@ -518,7 +525,10 @@ class Analyzer(object):
 
             divergence = float(sum_PR + sum_QR) * 0.5
             significance = float(sum_bg_RR + sum_R_RR) * 0.5
-            overall_sum += ((1 - divergence) * (1 + significance)) * 0.5
+            position_profile_similarity = ((1 - divergence) * (1 + significance)) * 0.5
+            assert(profile_similarities_by_position.get((domain, i)) == None)
+            profile_similarities_by_position[(domain, i)] = position_profile_similarity
+            overall_sum += position_profile_similarity
             overall_count += 1.0
 
         return float(overall_sum) / float(overall_count)
@@ -584,12 +594,39 @@ class Analyzer(object):
     # Main function
 
 
+    def read_published_profile_similarities_by_position(self):
+        '''Returns a mapping from benchmark name -> position pairs (domain, position) -> profile similarity at that position
+           for the data used in the original publication.'''
+
+        # We only have the raw data for two methods at present
+        profile_similarities_by_position = {}
+        if self.published_data_methods:
+            colortext.wgreen('Calculating profile similarity from the publication data: ')
+            if '0.9' in self.published_data_methods:
+                profile_similarities_by_position['Published (score12)@backrub_0.9'] = {}
+                for mutual_information_filepath in sorted(glob.glob(os.path.join('..', 'output', 'backrub', '*_0.9.mi'))):
+                    fasta_file = os.path.splitext(mutual_information_filepath)[0] + '.fasta'
+                    assert(os.path.exists(fasta_file))
+                    domain = os.path.split(mutual_information_filepath)[1].split('_')[0]
+                    self.compute_profile_similarity(domain, mutual_information_filepath, fasta_file, profile_similarities_by_position['Published (score12)@backrub_0.9'])
+            if 'Fixed' in self.published_data_methods:
+                profile_similarities_by_position['Published (score12)@fixbb'] = {}
+                for mutual_information_filepath in sorted(glob.glob(os.path.join('..', 'output', 'fixed_backbone', '*_0.0.mi'))):
+                    fasta_file = os.path.splitext(mutual_information_filepath)[0] + '.fasta'
+                    assert(os.path.exists(fasta_file))
+                    domain = os.path.split(mutual_information_filepath)[1].split('_')[0]
+                    self.compute_profile_similarity(domain, mutual_information_filepath, fasta_file, profile_similarities_by_position['Published (score12)@fixbb'])
+            colortext.message('Done.')
+        return profile_similarities_by_position
+
+
     def run(self):
         covariation_similarities = {}
         profile_similarities = {}
         sequence_recoveries = {}
         average_entropies = {}
         residue_entropies = {}
+        profile_similarities_by_position = self.read_published_profile_similarities_by_position()
 
         for benchmark_id, benchmark_details in sorted(self.benchmark_details.iteritems()):
             covariation_similarities[benchmark_id] = {}
@@ -597,6 +634,7 @@ class Analyzer(object):
             sequence_recoveries[benchmark_id] = {}
             average_entropies[benchmark_id] = {}
             residue_entropies[benchmark_id] = {}
+            profile_similarities_by_position[benchmark_id] = {}
             input_directory = benchmark_details['root_path']
             assert(os.path.exists(input_directory))
             file_filter = benchmark_details['file_filter']
@@ -622,7 +660,7 @@ class Analyzer(object):
                         # Compute the benchmark metrics for each domain
                         # todo: this is where most of the time is taken in the loop - we could cache these values
                         covariation_similarities[benchmark_id][domain] = self.compute_covariation_similarity(domain, mutual_information_filepath)
-                        profile_similarities[benchmark_id][domain] = self.compute_profile_similarity(domain, mutual_information_filepath, fasta_file)
+                        profile_similarities[benchmark_id][domain] = self.compute_profile_similarity(domain, mutual_information_filepath, fasta_file, profile_similarities_by_position[benchmark_id])
                         sequence_recoveries[benchmark_id][domain] = self.compute_sequence_recovery(domain, fasta_file)
                         residue_entropies[benchmark_id][domain] = json.loads(read_file(residue_entropies_filepath))
                         average_entropies[benchmark_id][domain] = numpy.mean(residue_entropies[benchmark_id][domain].values())
@@ -637,9 +675,8 @@ class Analyzer(object):
             raise Exception('There were no domains common to the specified benchmark runs.')
         common_domains = sorted(common_domains)
 
-        #cross_analyze_methods_and_benchmarks_by_position
-
         colortext.message('Creating analysis plots in {0}.'.format(self.output_directory))
+        self.cross_analyze_methods_and_benchmarks_by_position(profile_similarities_by_position, common_domains)
         self.cross_analyze_methods_and_benchmarks(covariation_similarities, profile_similarities, sequence_recoveries, common_domains)
         #self.analyze_residue_sequence_entropy(residue_entropies, common_domains)
         self.analyze_covariation_similarity(covariation_similarities, common_domains)
@@ -707,11 +744,109 @@ class Analyzer(object):
         return title, (details['method'], method_details)
 
 
-    def cross_analyze_methods_and_benchmarks_by_position(self, covariation_similarities, profile_similarities, sequence_recoveries, common_domains):
+    def cross_analyze_methods_and_benchmarks_by_position(self, profile_similarities_by_position, common_domains):
         '''Create scatterplots comparing the same metrics across different benchmark runs.'''
 
-        raise Exception('to be implemented') #todo
-        
+        benchmark_metrics = [
+            # Metric name, dict name, name in published_data.py
+            ['Profile similarity', profile_similarities_by_position, 'profile_similarity', 0.01],
+        ]
+        filename_prefixes, similarity_ranges = {}, {}
+        for benchmark_metric in benchmark_metrics:
+            filename_prefixes[benchmark_metric[0]] = benchmark_metric[2]
+            similarity_ranges[benchmark_metric[0]] = benchmark_metric[3]
+
+        # Read in the published and benchmark run data
+        data_by_method = {}
+        for benchmark_id, positional_data in profile_similarities_by_position.iteritems():
+            if benchmark_id.startswith('Published (score12)@'):
+                title = benchmark_id.split('@')[0]
+                if benchmark_id.endswith('Fixed'):
+                    method = ('Fixed', '')
+                else:
+                    method = ('backrub', 'kT={0}'.format(benchmark_id.split('@')[1].replace('backrub_', '')))
+            else:
+                title, method = self.get_scatterplot_title_(benchmark_id)
+            data_by_method[method] = data_by_method.get(method, {})
+            for benchmark_metric in benchmark_metrics:
+                data_by_method[method][benchmark_metric[0]] = data_by_method[method].get(benchmark_metric[0], {})
+                if title in data_by_method[method][benchmark_metric[0]]:
+                    colortext.error('Ambiguity: The selected benchmarks do not have unique titles ("{0}"). The scatterplots for comparing benchmark runs over the same methods cannot be created.'.format(title))
+                    return
+                data_by_method[method][benchmark_metric[0]][title] = benchmark_metric[1][benchmark_id]
+
+        # For all comparable sets (same method, same metric), create a scatterplot of the values
+        all_benchmark_ids = set()
+        for method, method_data in data_by_method.iteritems():
+            for metric_name, benchmark_values in method_data.iteritems():
+                all_benchmark_ids = all_benchmark_ids.union(set(benchmark_values.keys()))
+        all_benchmark_ids.remove('Published (score12)')
+        all_benchmark_ids = sorted(all_benchmark_ids)
+
+        # Use a fixed color for the published data (this can be overridden with colors.json)
+        series_colors = {
+            'Published (score12)' : '#008B8B',
+        }
+        # Use colors spaced around the HSV wheel for the remaining benchmarks
+        rgbcolors = color_wheel(len(all_benchmark_ids), start = 15, saturation_adjustment = None)
+        for x in range(len(all_benchmark_ids)):
+            series_colors[all_benchmark_ids[x]] = '#' + rgbcolors[x]
+        # Override any colors with those specified in the command line, if any
+        series_colors.update(self.series_colors)
+
+        # Create a subdirectory to hold the individual plots
+        if not os.path.exists(os.path.join(self.output_directory, 'positional_scatterplots')):
+            os.mkdir(os.path.join(self.output_directory, 'positional_scatterplots'))
+
+        # For all comparable sets (same method, same metric), create a scatterplot of the values
+        for method, method_data in data_by_method.iteritems():
+            # method e.g. = ('Fixed', '')
+            for metric_name, benchmark_values in method_data.iteritems():
+                # metric_name e.g. = ('Covariation similarity', '') benchmark_values: benchmark_id -> domain -> value
+                similarity_range = similarity_ranges[metric_name]
+                benchmark_ids = sorted(benchmark_values.keys())
+                for x in range(len(benchmark_ids)):
+                    for y in range(x + 1, len(benchmark_ids)):
+                        benchmark_id_1 = benchmark_ids[x]
+                        benchmark_id_2 = benchmark_ids[y]
+
+                        x_color = series_colors[benchmark_id_1]
+                        y_color = series_colors[benchmark_id_2]
+
+                        # Get the list of positions common to both runs
+                        xy_keys = sorted(set(benchmark_values[benchmark_id_1].keys()).intersection(set(benchmark_values[benchmark_id_2].keys())))
+
+                        plot_title = '{0}, {1}'.format(metric_name, '@'.join([a for a in method if a]))
+                        x_axis_label = benchmark_id_1
+                        y_axis_label = benchmark_id_2
+                        data_table_headers = ('Position', benchmark_id_1, benchmark_id_2, 'Entropy', 'Classification')
+                        data_table = []
+                        for domain_position in xy_keys:
+                            entropy_classification = self.entropy_levels_by_position[domain_position]
+
+                            xydiff = benchmark_values[benchmark_id_1][domain_position] - benchmark_values[benchmark_id_2][domain_position]
+                            if -similarity_range <= xydiff <= similarity_range:
+                                similarity_classification = 'Similar'
+                            elif xydiff > 0:
+                                similarity_classification = 'X'
+                            elif xydiff < 0:
+                                similarity_classification = 'Y'
+
+                            data_table.append(('{0}_{1}'.format(domain_position[0], domain_position[1]), benchmark_values[benchmark_id_1][domain_position], benchmark_values[benchmark_id_2][domain_position], entropy_classification, similarity_classification))
+                        file_prefix = '_'.join([a.lower().replace(' ', '_').replace('=', '_') for a in [self.analysis_file_prefix, filename_prefixes[metric_name], method[0], method[1], x_axis_label, 'vs', y_axis_label] if a])
+                        self.create_positional_scatterplot(os.path.join(self.output_directory, 'positional_scatterplots', file_prefix), data_table_headers, data_table, 1, 2, x_color, y_color, plot_title, x_axis_label, y_axis_label)
+
+        # Combine the plots into a PDF file
+        colortext.message('Creating a PDF containing all of the positional scatterplots.')
+        try:
+            if os.path.exists(os.path.join(self.output_directory, 'benchmark_vs_benchmark_positional_scatterplots.pdf')):
+                os.remove(os.path.join(self.output_directory, 'benchmark_vs_benchmark_positional_scatterplots.pdf'))
+            p = subprocess.Popen(shlex.split('convert {0} benchmark_vs_benchmark_positional_scatterplots.pdf'.format(os.path.join('positional_scatterplots', '*.png'))), cwd = self.output_directory)
+            stdoutdata, stderrdata = p.communicate()
+            if p.returncode != 0: raise Exception('')
+        except:
+            colortext.error('An error occurred while combining the positional scatterplots using the convert application (ImageMagick).')
+
 
     def cross_analyze_methods_and_benchmarks(self, covariation_similarities, profile_similarities, sequence_recoveries, common_domains):
         '''Create scatterplots comparing the same metrics across different benchmark runs.'''
@@ -823,6 +958,107 @@ class Analyzer(object):
             if p.returncode != 0: raise Exception('')
         except:
             colortext.error('An error occurred while combining the scatterplots using the convert application (ImageMagick).')
+
+
+    def create_positional_scatterplot(self, file_prefix, data_table_headers, data_table, x_series_index, y_series_index, x_color, y_color, plot_title = '', x_axis_label = '', y_axis_label = ''):
+        # Create the R script
+        boxplot_r_script = '''
+library(ggplot2)
+library(gridExtra)
+library(scales)
+library(qualV)
+
+# PNG generation
+png('%(file_prefix)s.png', width=2560, height=2048, bg="white", res=600)
+txtalpha <- 0.5
+redtxtalpha <- 0.8
+
+%(png_plot_commands)s
+    '''
+
+        xy_table_file = file_prefix + '.txt'
+        write_file(file_prefix + '.txt', '\n'.join(','.join(map(str, line)) for line in [data_table_headers] + data_table))
+
+        high_range = '{0:.2f} - {1:.2f}'.format(self.entropy_levels_ranges['high'][0], self.entropy_levels_ranges['high'][1])
+        medium_range = '{0:.2f} - {1:.2f}'.format(self.entropy_levels_ranges['medium'][0], self.entropy_levels_ranges['medium'][1])
+        low_range = '{0:.2f} - {1:.2f}'.format(self.entropy_levels_ranges['low'][0], self.entropy_levels_ranges['low'][1])
+
+        single_plot_commands = '''
+# Set the margins
+par(mar=c(5, 5, 1, 1))
+
+xy_data <- read.csv('%(xy_table_file)s', header=T)
+
+names(xy_data)[%(x_series_index)d + 1] <- "xvalues"
+names(xy_data)[%(y_series_index)d + 1] <- "yvalues"
+
+# coefs contains two values: (Intercept) and yvalues
+coefs <- coef(lm(xvalues~yvalues, data = xy_data))
+fitcoefs = coef(lm(xvalues~0 + yvalues, data = xy_data))
+fitlmv_yvalues <- as.numeric(fitcoefs[1])
+lmv_intercept <- as.numeric(coefs[1])
+lmv_yvalues <- as.numeric(coefs[2])
+lm(xy_data$yvalues~xy_data$xvalues)
+
+xlabel <- "%(x_axis_label)s"
+ylabel <- "%(y_axis_label)s"
+plot_title <- "%(plot_title)s"
+rvalue <- cor(xy_data$yvalues, xy_data$xvalues)
+
+                            #pprint.pprint(self.entropy_levels_ranges)
+                            #{'high': (0.770027052352, 0.949615557346),
+                            #'low': (0.0, 0.535423817387),
+                            #'medium': (0.535768318026, 0.769974734857)}
+
+
+# Alphabetically, "Similar" < "X" < "Y" so the logic below works
+count_high <- "High\n(%(high_range)s)"
+count_medium <- "Medium\n(%(medium_range)s)"
+count_low <- "Low\n(%(low_range)s)"
+count_high <- "High"
+count_medium <- "Medium"
+count_low <- "Low"
+
+# Set graph limits and the position for the correlation value
+minx <- 0.0
+maxx <- min(1.0, max(xy_data$xvalues) + 0.1)
+miny <- 0.0
+maxy <- min(1.0, max(xy_data$yvalues) + 0.1)
+maxx <- max(maxx, maxy)
+maxy <- maxx
+xpos <- maxx / 10.0
+ypos <- maxy - (maxy / 10.0)
+
+plot_scale <- scale_color_manual(
+    "Entropy",
+    values = c( "high" = '#770000', "medium" = '#007777', "low" ='#0000aa'),
+    labels = c(  "high" = count_high, "medium" = count_medium, "low" = count_low) )
+
+p <- qplot(main="", xvalues, yvalues, data=xy_data, xlab=xlabel, ylab=ylabel, size=I(1), shape = I(19), alpha = I(txtalpha), col=factor(Entropy)) +
+        plot_scale +
+        labs(title = "%(plot_title)s") +
+        theme(plot.title = element_text(color = "#555555", size=rel(0.75))) +
+        guides(col = guide_legend()) +
+        geom_abline(size = 0.125, color="orange", intercept = lmv_intercept, slope = lmv_yvalues, alpha=0.2) +
+        geom_abline(slope=1, intercept=0, linetype=3, size=0.25, alpha=0.4) + # add a diagonal (dotted)
+        coord_cartesian(xlim = c(0.0, maxx), ylim = c(0.0, maxy)) + # set the graph limits
+        geom_text(hjust=0, size=4, colour="black", aes(xpos, ypos, fontface="plain", family = "sans", label=sprintf("R = %%0.2f", round(rvalue, digits = 4)))) # add correlation text; hjust=0 sets left-alignment
+
+# Plot graph
+p
+
+dev.off()
+        '''
+
+        # Create the R script
+        plot_type = 'png'
+        png_plot_commands = single_plot_commands % locals()
+        boxplot_r_script = boxplot_r_script % locals()
+        r_script_filepath = os.path.join(self.output_directory, '{0}.R'.format(file_prefix))
+        write_file(r_script_filepath, boxplot_r_script)
+
+        # Run the R script
+        run_r_script(r_script_filepath, cwd = os.path.join(self.output_directory, 'positional_scatterplots'))
 
 
     def create_scatterplot(self, file_prefix, data_table_headers, data_table, x_series_index, y_series_index, x_color, y_color, plot_title = '', x_axis_label = '', y_axis_label = ''):
@@ -1093,7 +1329,7 @@ benchmark_data <- data.frame(benchmark=c('%(benchmark_column)s'),
             boxplot_r_script += '''benchmark_data <- rbind(plos_benchmark_data, benchmark_data)\n'''
 
         boxplot_r_script += '''
-pdf('%(analysis_file_prefix)s%(metric_column_name)s.pdf')
+pdf('%(analysis_file_prefix)s%(metric_column_name)s_boxplots.pdf')
 %(boxplot_generation_commands)s
 dev.off()
 ''' % locals()
