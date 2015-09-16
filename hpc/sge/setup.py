@@ -31,7 +31,7 @@ methods = dict(
         ),
         dependent_binaries = ['backrub', 'fixbb'],
         uses_temperature = True,
-        file_filter = "([0-9A-Za-z]{4})_([0-9A-Za-z]{1})_%(temperature)s_\\d+_0001_last_0001.pdb",
+        file_filter = "([0-9A-Za-z]{4})_([0-9A-Za-z]{1})_%(temperature)s_(?P<nstruct>\\d+)_0001_last_0001.pdb",
     ),
     Fixed = dict(
         method_type = 'Fixed backbone',
@@ -41,7 +41,7 @@ methods = dict(
         dependent_binaries = ['fixbb'],
         default_title = 'Fixed',
         uses_temperature = False,
-        file_filter = "([0-9A-Za-z]{4})_([0-9A-Za-z]{1})_\\d+_0001.pdb",
+        file_filter = "([0-9A-Za-z]{4})_([0-9A-Za-z]{1})_(?P<nstruct>\\d+)_0001.pdb",
     ),
 )
 
